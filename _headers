@@ -1,0 +1,11 @@
+# Cloudflare Pages 边缘缓存策略
+# 静态单页应用：HTML 不缓存（保证发版即时生效），API 不缓存（数据实时）
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+/api/*
+  Cache-Control: no-store
+
+# 若将来拆分出带哈希的静态资源（/assets/*），可长缓存：
+# /assets/*
+#   Cache-Control: public, max-age=31536000, immutable

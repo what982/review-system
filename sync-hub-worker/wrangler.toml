@@ -1,0 +1,20 @@
+name = "sync-hub-worker"
+main = "index.js"
+compatibility_date = "2026-07-29"
+workers_dev = true
+
+# 实时同步中枢路由：把自定义域名下的 /api/sync/* 交给本 Worker 处理
+# （WebSocket 升级 + 广播 都走自定义域名，避免暴露 workers.dev，且与前端同源）
+# 注意：其余路径仍由 Pages 项目处理；Worker 路由按路径前缀优先匹配。
+routes = [
+  { pattern = "keping.whatis.dpdns.org/api/sync/*", zone_name = "whatis.dpdns.org" }
+]
+
+# 本 Worker 定义并持有 SyncHub Durable Object（命名空间/storage 由此 Worker 的 migration 创建）
+[[durable_objects.bindings]]
+  name = "SYNC_HUB"
+  class_name = "SyncHub"
+
+[[migrations]]
+  tag = "v1"
+  new_sqlite_classes = ["SyncHub"]

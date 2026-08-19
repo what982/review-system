@@ -1,0 +1,2871 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧课评系统 · 豆包AI</title>
+    <!-- 云端数据库改为 Cloudflare D1（经同源 /api 访问 Pages Functions），不再依赖 Supabase 客户端 -->
+    <style>
+        :root {
+            --primary: #6366F1;
+            --primary-light: #818CF8;
+            --primary-dark: #4F46E5;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --danger: #EF4444;
+            --bg: #F8FAFC;
+            --card: #FFFFFF;
+            --text: #1E293B;
+            --text-muted: #64748B;
+            --border: #E2E8F0;
+            --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.04);
+            --radius: 12px;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+            min-height: 100dvh;
+        }
+        
+        /* 登录页 */
+        .login-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center;
+            z-index: 2000; visibility: visible; opacity: 1; transition: 0.3s;
+        }
+        .login-overlay.hidden { visibility: hidden; opacity: 0; pointer-events: none; }
+        .main-content { display: none; }
+        .main-content.visible { display: block; }
+        .login-wrap {
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+        .login-card {
+            background: white;
+            border-radius: 20px;
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .login-card h1 {
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 24px;
+            color: var(--primary);
+        }
+        .login-card .subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 32px;
+            font-size: 14px;
+        }
+        .form-group { margin-bottom: 20px; }
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.2s;
+            background: white;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+        }
+        button {
+            cursor: pointer;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            padding: 14px 28px;
+            width: 100%;
+        }
+        .btn-primary:hover { background: var(--primary-dark); transform: translateY(-1px); }
+        .btn-primary:active { transform: translateY(0) scale(0.98); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .btn-secondary {
+            background: white;
+            color: var(--text);
+            border: 2px solid var(--border);
+            padding: 10px 20px;
+        }
+        .btn-secondary:hover { border-color: var(--primary); color: var(--primary); transform: translateY(-1px); }
+        .btn-secondary:active { transform: translateY(0) scale(0.98); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-sm { padding: 6px 14px; font-size: 13px; }
+        
+        .login-error {
+            color: var(--danger);
+            font-size: 13px;
+            text-align: center;
+            margin-top: 12px;
+            min-height: 20px;
+        }
+        
+        /* 主布局 */
+        .app-wrap {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px 20px;
+        }
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid var(--border);
+        }
+        .app-title {
+            font-size: 22px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .app-title span { color: var(--primary); }
+        .badge {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        /* 导航标签 */
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            background: white;
+            padding: 6px;
+            border-radius: 14px;
+            box-shadow: var(--shadow);
+        }
+        .nav-tab {
+            flex: 1;
+            padding: 12px 16px;
+            text-align: center;
+            border-radius: 10px;
+            background: transparent;
+            color: var(--text-muted);
+        }
+        .nav-tab:hover { background: var(--bg); color: var(--text); }
+        .nav-tab.active {
+            background: var(--primary);
+            color: white;
+            box-shadow: 0 4px 12px rgba(99,102,241,0.3);
+        }
+        
+        /* 内容区 */
+        .tab-content { display: none; animation: fadeIn 0.3s; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* 卡片 */
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        @media (hover: hover) and (pointer: fine) {
+            .card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+        }
+        .card-header {
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #fafafa, #f5f5f5);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .card-header h3 { font-size: 16px; font-weight: 700; }
+        .card-body { padding: 20px; }
+        
+        /* 表单网格 */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        
+        /* 工具栏 */
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+            align-items: flex-end;
+        }
+        .toolbar .form-group { margin-bottom: 0; flex: 1; min-width: 150px; }
+        
+        /* 表格 */
+        .table-wrap {
+            overflow-x: auto;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: #f8fafc;
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        tr:hover { background: #f8fafc; }
+        tr:last-child td { border-bottom: none; }
+        
+        /* 按钮组 */
+        .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+        /* 小按钮固定宽度，防止挤压变形 */
+        .btn-sm { min-width: 64px; flex-shrink: 0; }
+        .card-header .btn-group { gap: 6px; }
+        .card-header .btn-sm { min-width: 52px; font-size: 12px; padding: 6px 10px; }
+        
+        /* 学生选择 */
+        .student-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            max-height: 180px;
+            overflow-y: auto;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+        .student-tag {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .student-tag:hover { border-color: var(--primary); background: #f0f4ff; }
+        .student-tag input { cursor: pointer; }
+
+        /* 批量学生选择卡片列表 */
+        .batch-student-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 8px;
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 4px;
+        }
+        @media (max-width: 640px) {
+            .batch-student-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+        }
+        .batch-student-card {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: white;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .batch-student-card:hover { border-color: var(--primary-light); background: #f8f7ff; }
+        .batch-student-card.checked {
+            border-color: var(--primary);
+            background: linear-gradient(135deg, #ede9fe, #e0e7ff);
+        }
+        .batch-student-card input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--primary);
+            flex-shrink: 0;
+        }
+        .batch-student-info { flex: 1; min-width: 0; }
+        .batch-student-name { font-weight: 600; font-size: 14px; color: var(--text); }
+        .batch-student-class { font-size: 12px; color: var(--text-muted); }
+        
+        /* 滑块 */
+        .range-wrap {
+            background: var(--bg);
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+        .range-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .range-value {
+            background: var(--primary);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 700;
+        }
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(90deg, var(--primary-light), var(--primary));
+            outline: none;
+            border: none;
+            padding: 0;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            border: 3px solid var(--primary);
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        /* 生成卡片 */
+        .result-card {
+            background: linear-gradient(135deg, #fefce8, #fef9c3);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-left: 4px solid var(--warning);
+        }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed #eab308;
+        }
+        .result-text {
+            white-space: pre-wrap;
+            line-height: 1.7;
+            font-size: 14px;
+        }
+        
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #1e293b;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-size: 14px;
+            z-index: 9999;
+            opacity: 0;
+            transition: all 0.3s;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        .toast.error { background: var(--danger); }
+        
+        /* 加载指示器 */
+        .loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* 信息提示 */
+        .info-tip {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-left: 4px solid #3b82f6;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #1e40af;
+            margin-top: 12px;
+        }
+        
+        /* 模态框 */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 20px;
+            width: 100%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+            animation: modalIn 0.3s;
+        }
+        @keyframes modalIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+        }
+        .modal-header h3 { font-size: 18px; }
+        .modal-body { padding: 24px; }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        
+        /* 批量结果 */
+        .batch-result {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border-left: 4px solid var(--primary);
+            box-shadow: var(--shadow);
+        }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .app-wrap { padding: 12px; }
+            .app-title { font-size: 18px; }
+            .form-grid { grid-template-columns: 1fr; }
+            .nav-tabs { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+            .nav-tab { padding: 10px 12px; font-size: 13px; }
+
+            /* 卡片头部：标题和按钮同行 */
+            .card-header {
+                padding: 10px 14px;
+                flex-wrap: nowrap;
+                align-items: center;
+            }
+            .card-header h3 { font-size: 14px; margin-bottom: 0; width: auto; }
+            .card-header .btn-group { gap: 4px; }
+            .card-header .btn-sm { font-size: 11px; padding: 5px 8px; min-width: auto; }
+
+            /* 工具栏横向滚动，避免换行堆叠 */
+            .toolbar {
+                flex-direction: row;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 4px;
+            }
+            .toolbar .form-group { min-width: 120px; flex: none; }
+            .toolbar .btn-group { flex: none; white-space: nowrap; }
+
+            /* 表格行高适配 */
+            th, td { padding: 8px 10px; font-size: 13px; }
+        }
+        @media (max-width: 640px) {
+            /* 卡片头部在更窄屏幕允许换行，避免标题被挤压 */
+            .card-header { flex-wrap: wrap; }
+
+            /* 课堂记录表格→卡片化 */
+            .record-table-card thead { display: none; }
+            .record-table-card tbody tr {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 12px;
+                margin-bottom: 8px;
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                background: white;
+            }
+            .record-table-card td {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 4px 0;
+                border-bottom: 1px solid var(--border);
+                font-size: 12px;
+            }
+            .record-table-card td::before {
+                content: attr(data-label);
+                font-weight: 600;
+                color: var(--text-muted);
+                font-size: 11px;
+                text-transform: uppercase;
+                flex-shrink: 0;
+            }
+            .record-table-card td:last-child { border-bottom: none; }
+            .record-table-card td .editable-field { text-align: right; max-width: 65%; word-break: break-all; }
+            .record-table-card td.btn-group { justify-content: flex-end; }
+            .record-table-card td.btn-group button { font-size: 11px; padding: 5px 8px; }
+
+            /* 批量学生卡片更紧凑 */
+            .batch-student-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+            .batch-student-card { padding: 8px; }
+            .batch-student-name { font-size: 13px; }
+            .batch-student-class { font-size: 11px; }
+
+            /* 输入框在移动端全宽 */
+            .toolbar .form-group input,
+            .toolbar .form-group select { min-width: 0; }
+
+            /* 模态框全屏适配 */
+            .modal { max-width: calc(100% - 24px); border-radius: 16px; }
+
+            /* 顶部 header：操作区在窄屏换行堆叠，避免溢出 */
+            .app-header { flex-direction: column; align-items: stretch; gap: 10px; }
+            .header-actions {
+                display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+            }
+            .header-actions .btn-sm { flex: 1; min-width: 0; }
+            .header-actions #networkStatus { flex: 1; min-width: 0; justify-content: center; }
+        }
+
+        /* 手机竖屏（≤480px）：更紧凑、更大的可点区域 */
+        @media (max-width: 480px) {
+            .app-wrap { padding: 10px 10px 80px; }
+            .app-title { font-size: 16px; }
+            .app-title .badge { font-size: 11px; padding: 3px 8px; }
+
+            /* 登录卡片更紧凑 */
+            .login-card { padding: 32px 22px; border-radius: 18px; }
+            .login-card h1 { font-size: 20px; }
+            .login-card .subtitle { font-size: 13px; margin-bottom: 24px; }
+            .login-wrap { padding: 14px; }
+
+            /* 导航标签：两行或等宽，字号更小 */
+            .nav-tabs { gap: 4px; padding: 5px; }
+            .nav-tab { padding: 9px 6px; font-size: 12px; }
+
+            /* 卡片内边距缩小 */
+            .card-header { padding: 12px 14px; }
+            .card-header h3 { font-size: 15px; }
+            .card-body { padding: 14px; }
+
+            /* 卡片头部按钮：图标为主，节省空间 */
+            .card-header .btn-sm { font-size: 12px; padding: 7px 9px; min-width: auto; }
+
+            /* 工具栏：输入框和按钮单列堆叠，更易点 */
+            .toolbar {
+                flex-direction: column;
+                flex-wrap: nowrap;
+                overflow-x: visible;
+            }
+            .toolbar .form-group { min-width: 0; width: 100%; }
+            .toolbar .btn-group { width: 100%; }
+            .toolbar > button, .toolbar .btn-group > button { width: 100%; }
+
+            /* 表单网格单列 */
+            .form-grid { grid-template-columns: 1fr; gap: 12px; }
+
+            /* 学生标签：单个占满，便于触屏点选 */
+            .student-tag { font-size: 14px; padding: 8px 14px; }
+
+            /* 生成结果卡片内边距 */
+            .result-card { padding: 14px; }
+            .result-header { flex-wrap: wrap; gap: 8px; }
+            .result-header .btn-sm { width: 100%; }
+
+            /* 弹窗底部按钮全宽 */
+            .modal-body { padding: 18px; }
+            .modal-footer { flex-direction: column; gap: 10px; padding: 16px 18px; }
+            .modal-footer button { width: 100%; padding: 12px; }
+
+            /* 记录表格卡片化已生效，这里微调间距与字号 */
+            .record-table-card tbody tr { padding: 14px; margin-bottom: 10px; }
+            .record-table-card td { font-size: 13px; padding: 6px 0; }
+            .record-table-card td::before { font-size: 11px; }
+            .record-table-card td .editable-field { max-width: 70%; }
+            .record-table-card td.btn-group { justify-content: stretch; gap: 8px; }
+            .record-table-card td.btn-group button { flex: 1; font-size: 13px; padding: 9px 6px; }
+
+            /* 同步/网络状态条更大可点 */
+            .header-actions #syncNowBtn { font-size: 13px; padding: 9px 10px; }
+        }
+
+        /* 超小屏（≤380px）：进一步压缩 */
+        @media (max-width: 380px) {
+            .app-title { font-size: 15px; }
+            .nav-tab { font-size: 11px; padding: 8px 4px; }
+            .card-body { padding: 12px; }
+            .batch-student-grid { grid-template-columns: 1fr 1fr; }
+        }
+        
+        /* 打印 */
+        @media print {
+            .app-header, .nav-tabs, .toolbar, button, .modal-overlay { display: none !important; }
+            .card { box-shadow: none; border: 1px solid #ddd; break-inside: avoid; }
+            body { background: white; }
+        }
+
+        /* 同步状态指示器 */
+        .sync-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 4px 12px;
+            background: var(--bg);
+            border-radius: 20px;
+            transition: all 0.3s;
+        }
+        .sync-status.syncing { color: var(--warning); }
+        .sync-status.unsynced { color: var(--danger); }
+        .sync-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            transition: background 0.3s;
+        }
+        .sync-status.syncing .sync-dot {
+            background: var(--warning);
+            animation: pulse 1s infinite;
+        }
+        .sync-status.unsynced .sync-dot {
+            background: var(--danger);
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .sync-badge {
+            background: var(--danger);
+            color: white;
+            border-radius: 10px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        /* 全局 loading 遮罩 */
+        #globalLoading {
+            position: fixed; inset: 0;
+            background: rgba(248,250,252,0.92);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            flex-direction: column;
+            gap: 16px;
+        }
+        #globalLoading.show { display: flex; }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* 网络状态指示器 */
+        .network-status {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: var(--bg);
+        }
+        .network-status.online { color: var(--success); }
+        .network-status.offline { color: var(--danger); }
+        .network-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        /* 实时同步连接状态圆点 */
+        .rt-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--border);
+            display: inline-block;
+            cursor: help;
+            transition: background .2s, box-shadow .2s;
+        }
+        .rt-dot.on {
+            background: var(--success);
+            box-shadow: 0 0 0 3px rgba(34,197,94,0.18);
+        }
+
+        /* 批量生成进度条 */
+        .progress-bar-wrap {
+            width: 100%;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 8px;
+            display: none;
+        }
+        .progress-bar-wrap.show { display: block; }
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--success));
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+
+<!-- 登录页 -->
+<div id="loginOverlay" class="login-overlay">
+    <div class="login-card">
+        <h1>📚 智慧课评系统</h1>
+        <p class="subtitle">豆包AI · 班级管理 · 月度整合</p>
+        <div class="form-group">
+            <label>用户名</label>
+            <input type="text" id="loginUsername" placeholder="请输入用户名" autocomplete="off">
+        </div>
+        <div class="form-group">
+            <label>密码</label>
+            <input type="password" id="loginPassword" placeholder="请输入密码" autocomplete="off">
+        </div>
+        <div id="loginError" class="login-error"></div>
+        <button id="loginSubmitBtn" class="btn-primary">登 录</button>
+    </div>
+</div>
+
+<!-- 全局加载遮罩 -->
+<div id="globalLoading">
+    <div class="spinner"></div>
+    <span style="color:var(--text-muted);font-size:14px;">正在加载数据...</span>
+</div>
+
+<!-- 主界面 -->
+<div id="mainContent" class="main-content">
+    <div class="app-wrap">
+        <div class="app-header">
+            <div class="app-title">📚 智慧课评系统 <span class="badge">豆包AI</span></div>
+            <div class="header-actions">
+                <div id="syncStatusBadge" class="sync-status" style="display:none;">
+                    <span class="sync-dot"></span>
+                    <span id="syncStatusText">已同步</span>
+                    <span id="syncBadgeNum" class="sync-badge" style="display:none;">0</span>
+                </div>
+                <button id="syncNowBtn" class="btn-secondary btn-sm" style="display:none;" title="立即同步到云端">☁️ 同步</button>
+                <div id="networkStatus" class="network-status online" title="网络状态">
+                    <span class="network-dot"></span>
+                    <span id="networkText">在线</span>
+                </div>
+                <span id="rtDot" class="rt-dot" title="实时同步：连接中"></span>
+                <button id="logoutBtn" class="btn-secondary btn-sm">退出登录</button>
+            </div>
+        </div>
+        
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-tab="config">⚙️ 班级管理</button>
+            <button class="nav-tab" data-tab="record">📝 课堂记录</button>
+            <button class="nav-tab" data-tab="monthly">📅 月度整合</button>
+        </div>
+        
+        <!-- 配置页 -->
+        <div id="tab-config" class="tab-content active">
+            <div class="card">
+                <div class="card-header">
+                    <h3>🤖 豆包API 配置</h3>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group"><label>API Key</label>
+                            <div style="position:relative;">
+                                <input type="password" id="apiKey" placeholder="火山引擎 API Key">
+                                <button id="toggleApiShow" type="button" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;padding:4px;" title="显示/隐藏">👁️</button>
+                            </div>
+                        </div>
+                        <div class="form-group"><label>接入点ID</label><input type="text" id="modelId" placeholder="ep-xxxxxxxxxx"></div>
+                        <div class="form-group"><label>端点地址</label><input type="text" id="endpoint" value="https://ark.cn-beijing.volces.com/api/v3/chat/completions"></div>
+                    </div>
+                    <div class="btn-group">
+                        <button id="testApiBtn" class="btn-secondary">🔍 测试连接</button>
+                        <button id="saveApiBtn" class="btn-primary" style="width:auto;">💾 保存配置</button>
+                    </div>
+                    <div id="apiTestStatus" class="info-tip" style="margin-top:12px;"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3>🏷️ 班级管理</h3>
+                    <button id="addClassBtn" class="btn-primary btn-sm">➕ 新班级</button>
+                </div>
+                <div class="card-body">
+                    <div class="btn-group" id="classListContainer" style="flex-wrap:wrap;"></div>
+                    <div class="info-tip">点击班级名称可编辑，删除会清除该班级所有学生和记录</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3>👥 学生管理</h3>
+                    <button id="batchDeleteStudentBtn" class="btn-danger btn-sm">🗑️ 批量删除</button>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group"><label>姓名</label><input type="text" id="stuName" placeholder="学生姓名"></div>
+                        <div class="form-group"><label>班级</label><select id="stuClassSelect"></select></div>
+                    </div>
+                    <div class="btn-group" style="margin-bottom:16px;">
+                        <button id="addStudentBtn" class="btn-primary" style="width:auto;">➕ 添加学生</button>
+                        <button id="clearStudentForm" class="btn-secondary">清空</button>
+                    </div>
+                    <div class="toolbar">
+                        <div class="form-group"><label>班级筛选</label><select id="filterClassSelect"></select></div>
+                        <div class="form-group"><label>姓名搜索</label><input type="text" id="searchNameInput" placeholder="搜索学生"></div>
+                        <button id="refreshStudentListBtn" class="btn-secondary">刷新</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead><tr><th><input type="checkbox" id="selectAllStudentsCheckbox"></th><th>学号</th><th>姓名</th><th>班级</th><th>操作</th></tr></thead>
+                            <tbody id="studentTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header"><h3>💾 数据备份</h3></div>
+                <div class="card-body">
+                    <div class="btn-group">
+                        <button id="exportDataBtn" class="btn-primary">📤 导出备份</button>
+                        <button id="importDataBtn" class="btn-secondary">📥 导入备份</button>
+                        <button id="clearAllDataBtn" class="btn-danger">⚠️ 清空所有数据</button>
+                    </div>
+                    <div class="info-tip">导出备份可迁移数据，导入将覆盖现有数据</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 记录页 -->
+        <div id="tab-record" class="tab-content">
+            <div class="card">
+                <div class="card-header"><h3>✨ 生成课评</h3></div>
+                <div class="card-body">
+                    <div class="range-wrap" style="margin-bottom:16px;">
+                        <div class="range-header">
+                            <label style="margin:0;">🎯 目标字数/生</label>
+                            <span id="wordCountValue" class="range-value">130</span>
+                        </div>
+                        <input type="range" id="wordSlider" min="60" max="300" value="130" step="5">
+                    </div>
+                    <div class="toolbar">
+                        <div class="form-group"><label>班级筛选</label><select id="classFilterSelectGen"></select></div>
+                        <div class="form-group"><label>姓名搜索</label><input type="text" id="nameFilterSelectGen" placeholder="搜索学生"></div>
+                        <button id="refreshStudentListGenBtn" class="btn-secondary">刷新</button>
+                    </div>
+                    <div id="studentChecklist" class="student-tags" style="margin-bottom:16px;"></div>
+                    <div class="form-grid">
+                        <div class="form-group"><label>📖 课堂内容</label><textarea id="classContentInput" rows="3" placeholder="本节课的课堂内容"></textarea></div>
+                        <div class="form-group"><label>💬 通用表现</label><textarea id="generalPerf" rows="3" placeholder="该班级的普遍表现"></textarea></div>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <div id="toggleIndividualBtn" style="cursor:pointer;color:var(--primary);font-weight:600;padding:10px 0;">👤 按学生单独填写表现（可选） ▼</div>
+                        <div id="individualPerfArea" style="display:none;background:var(--bg);padding:12px;border-radius:10px;margin-top:8px;"></div>
+                    </div>
+                    <button id="generatePreviewBtn" class="btn-primary" style="width:auto;">✨ 生成课评预览</button>
+                    <div id="generatedPreviews" style="margin-top:20px;"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h3>📋 课堂记录</h3>
+                    <div class="btn-group">
+                        <button id="batchDeleteBtn" class="btn-danger btn-sm">批量删除</button>
+                        <button id="batchEditSelectedBtn" class="btn-primary btn-sm">批量编辑</button>
+                        <button id="batchDeleteFilteredBtn" class="btn-danger btn-sm">删除筛选</button>
+                        <button id="selectAllRecordsBtn" class="btn-secondary btn-sm">全选</button>
+                        <button id="addRecordBtn" class="btn-primary btn-sm">新增记录</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="toolbar">
+                        <div class="form-group"><label>班级</label><select id="recordClassFilter"></select></div>
+                        <div class="form-group"><label>姓名</label><input type="text" id="recordNameSearch" placeholder="搜索学生"></div>
+                        <div class="form-group"><label>开始日期</label><input type="date" id="recordDateFrom"></div>
+                        <div class="form-group"><label>结束日期</label><input type="date" id="recordDateTo"></div>
+                        <button id="searchRecordsBtn" class="btn-secondary">筛选</button>
+                        <button id="resetRecordsBtn" class="btn-secondary">重置</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="record-table">
+                            <thead><tr><th data-label="选择"><input type="checkbox" id="recordSelectAllCheckbox"></th><th data-label="学生">学生</th><th data-label="班级">班级</th><th data-label="主题">主题</th><th data-label="课堂内容">课堂内容</th><th data-label="课评">课评</th><th data-label="时间">时间</th><th data-label="操作">操作</th></tr></thead>
+                            <tbody id="recordTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 月度页 -->
+        <div id="tab-monthly" class="tab-content">
+            <div class="card">
+                <div class="card-header"><h3>📅 月度课评整合</h3></div>
+                <div class="card-body">
+                    <div class="toolbar" style="margin-bottom:16px;">
+                        <div class="form-group"><label>班级筛选</label><select id="monthlyClassFilter"></select></div>
+                        <div class="form-group"><label>姓名搜索</label><input type="text" id="monthlyNameSearch" placeholder="搜索学生"></div>
+                        <button id="refreshMonthlyStudentBtn" class="btn-secondary">刷新</button>
+                    </div>
+                    <div class="form-grid" style="background:#f8fafc;padding:16px;border-radius:12px;margin-bottom:16px;">
+                        <div class="form-group"><label>选择学生</label><select id="studentSelect"><option value="">请选择学生</option></select></div>
+                        <div class="form-group"><label>选择月份</label><input type="month" id="monthPicker"></div>
+                        <div class="form-group"><label>目标字数</label><div class="range-value" id="targetWordDisplay" style="display:inline-block;margin-top:8px;">180</div></div>
+                        <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
+                            <button id="viewRecordsBtn" class="btn-secondary">查看记录</button>
+                            <button id="generateSummaryBtn" class="btn-primary">生成总结</button>
+                        </div>
+                    </div>
+                    <div class="range-wrap" style="margin-bottom:16px;">
+                        <div class="range-header"><label style="margin:0;">🎯 月度总结字数</label><span id="monthWordValue" class="range-value">180</span></div>
+                        <input type="range" id="monthWordSlider" min="80" max="400" value="180" step="10">
+                    </div>
+                    
+                    <div style="border-top:2px dashed var(--border);padding-top:16px;margin-top:16px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+                            <strong>👥 批量选择学生</strong>
+                            <div class="btn-group">
+                                <button id="batchSelectAllBtn" class="btn-secondary btn-sm">全选</button>
+                                <button id="batchClearAllBtn" class="btn-secondary btn-sm">清空</button>
+                                <span id="batchSelectedCount" style="background:var(--primary);color:white;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;display:none;">已选 0</span>
+                            </div>
+                        </div>
+                        <div id="batchStudentListContainer" class="batch-student-grid"></div>
+                        <div class="btn-group" style="margin-top:12px;">
+                            <button id="batchGenerateSummariesBtn" class="btn-primary">🚀 批量生成月度总结</button>
+                            <button id="clearBatchResultsBtn" class="btn-secondary btn-sm">清空结果</button>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top:20px;">
+                        <strong>📚 课堂内容汇总</strong>
+                        <button id="copyContentSummaryBtn" class="btn-secondary btn-sm" style="margin-left:8px;">复制</button>
+                        <div id="classContentSummary" class="result-text" style="margin-top:8px;padding:12px;background:var(--bg);border-radius:8px;">-</div>
+                    </div>
+                    <div style="margin-top:20px;">
+                        <strong>🤖 月度总结（可编辑）</strong>
+                        <button id="copyMonthlySummaryBtn" class="btn-secondary btn-sm" style="margin-left:8px;">复制</button>
+                        <textarea id="monthlySummaryEditable" rows="6" style="width:100%;margin-top:8px;padding:12px;border-radius:8px;border:1px solid var(--border);"></textarea>
+                    </div>
+                    
+                    <div style="margin-top:24px;">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                            <strong>📦 批量生成结果</strong>
+                            <span id="batchProgressMsg" style="font-size:13px;color:var(--text-muted);"></span>
+                        </div>
+                        <div id="batchProgressBar" class="progress-bar-wrap">
+                            <div id="batchProgressBarFill" class="progress-bar-fill"></div>
+                        </div>
+                        <div id="batchResultsContainer" style="max-height:500px;overflow-y:auto;"></div>
+                    </div>
+                    <div class="info-tip" style="margin-top:12px;">💡 批量生成将基于所选月份为目标字数为每个学生生成专属月度总结</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 模态框 -->
+<div id="addRecordModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header"><h3>📝 新增课堂记录</h3></div>
+        <div class="modal-body">
+            <div class="form-group"><label>选择学生</label><select id="modalStudentSelect"></select></div>
+            <div class="form-group"><label>本节课主题</label><input type="text" id="modalClassTopic" placeholder="如：循环结构（可选）"></div>
+            <div class="form-group"><label>课堂内容</label><textarea id="modalClassContent" rows="2" placeholder="知识点包括：……"></textarea></div>
+            <div class="form-group"><label>课评内容</label><textarea id="modalReviewText" rows="4"></textarea></div>
+            <div class="form-group"><label>记录时间</label><input type="datetime-local" id="modalRecordDate"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="closeModalBtn" class="btn-secondary">取消</button>
+            <button id="confirmAddRecordBtn" class="btn-primary" style="width:auto;">保存</button>
+        </div>
+    </div>
+</div>
+
+<div id="batchEditModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header"><h3>✏️ 批量编辑记录</h3></div>
+        <div class="modal-body">
+            <div class="form-group"><label>新课堂内容（留空不修改）</label><textarea id="batchEditClassContent" rows="2"></textarea></div>
+            <div class="form-group"><label>新课评（留空不修改）</label><textarea id="batchEditReviewText" rows="4"></textarea></div>
+        </div>
+        <div class="modal-footer">
+            <button id="closeBatchEditBtn" class="btn-secondary">取消</button>
+            <button id="confirmBatchEditBtn" class="btn-primary" style="width:auto;">确认修改</button>
+        </div>
+    </div>
+</div>
+
+<div id="toastMsg" class="toast"></div>
+
+<script>
+    (function() {
+        const ADMIN_USERNAME = "what";
+        const ADMIN_PASSWORD = "what123";
+        // ─── 云端 API（Cloudflare Pages Functions + D1，替代 Supabase）─────────────
+        // 前端不再直连任何第三方数据库，统一走同源 fetch('/api/...')；
+        // 多设备天然共享同一份 D1 数据，且不受 file:// null 源 / CORS 限制影响。
+        const API_BASE = '/api';
+        const api = {
+            async list(table) {
+                const res = await fetch(`${API_BASE}/${table}`, { headers: { 'Accept': 'application/json' } });
+                if (!res.ok) throw new Error(`加载${table}失败: HTTP ${res.status}`);
+                const json = await res.json();
+                return json.data || [];
+            },
+            async upsert(table, rows) {
+                if (!rows || !rows.length) return;
+                const res = await fetch(`${API_BASE}/${table}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items: rows })
+                });
+                if (!res.ok) { const t = await res.text(); throw new Error(`保存${table}失败: ${t}`); }
+                return await res.json();
+            },
+            async remove(table, id) {
+                const res = await fetch(`${API_BASE}/${table}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                if (!res.ok) throw new Error(`删除${table}失败: HTTP ${res.status}`);
+                return await res.json();
+            },
+            async ping() {
+                try { const res = await fetch(`${API_BASE}/ping`, { method: 'GET' }); return res.ok; }
+                catch (e) { return false; }
+            }
+        };
+        let apiReady = false;
+        let classes = [], students = [], records = [];
+        let individualPerfMap = {};
+        let currentTab = "config";
+        let _bindingsBound = false;
+
+        // ─── IndexedDB 本地缓存层 ────────────────────────────────
+        const DB_NAME = 'CourseReviewDB';
+        const DB_VERSION = 2;
+        const STORES = { classes: 'classes', students: 'students', records: 'records', pending: 'pending' };
+        let idbDB = null;
+
+        function openIDB() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, DB_VERSION);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('classes')) db.createObjectStore('classes', { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains('students')) db.createObjectStore('students', { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains('records')) db.createObjectStore('records', { keyPath: 'id' });
+                    const pending = db.createObjectStore('pending', { keyPath: 'id' });
+                    pending.createIndex('ts', 'ts', { unique: false });
+                };
+                req.onsuccess = (e) => { idbDB = e.target.result; resolve(idbDB); };
+                req.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        async function idbPut(store, data) {
+            return new Promise((resolve, reject) => {
+                const tx = idbDB.transaction(store, 'readwrite');
+                tx.objectStore(store).put(data);
+                tx.oncomplete = () => resolve();
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        async function idbGetAll(store) {
+            return new Promise((resolve, reject) => {
+                const tx = idbDB.transaction(store, 'readonly');
+                const req = tx.objectStore(store).getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        async function idbClear(store) {
+            return new Promise((resolve, reject) => {
+                const tx = idbDB.transaction(store, 'readwrite');
+                tx.objectStore(store).clear();
+                tx.oncomplete = () => resolve();
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        async function idbDelete(store, id) {
+            return new Promise((resolve, reject) => {
+                const tx = idbDB.transaction(store, 'readwrite');
+                tx.objectStore(store).delete(id);
+                tx.oncomplete = () => resolve();
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        let pendingCache = []; // 内存镜像，供退出同步路径同步读取（避免 unload 时再读 IndexedDB）
+        async function idbPutPending(action, store, data) {
+            const entry = {
+                id: (action === 'delete' ? 'del_' + data.id : 'op_' + Date.now() + Math.random()),
+                action, store, data,
+                ts: Date.now()
+            };
+            await idbPut('pending', entry);
+            pendingCache.push(entry);
+            updateSyncBadge();
+            scheduleFlush(); // 改动后立即（防抖）触发云端推送，避免等 30s 轮询
+        }
+
+        async function idbGetPending() {
+            return await idbGetAll('pending').catch(() => []);
+        }
+
+        async function idbClearPending() {
+            await idbClear('pending').catch(() => {});
+            pendingCache = [];
+            updateSyncBadge();
+        }
+
+        function updateSyncBadge() {
+            const badge = document.getElementById('syncStatusBadge');
+            const btn = document.getElementById('syncNowBtn');
+            if (!badge) return;
+            idbGetPending().then(list => {
+                const n = list.length;
+                if (n > 0 && badge.style.display !== 'none') {
+                    badge.classList.add('unsynced');
+                    badge.classList.remove('syncing');
+                    const numEl = document.getElementById('syncBadgeNum');
+                    if (numEl) { numEl.textContent = n; numEl.style.display = ''; }
+                    const textEl = document.getElementById('syncStatusText');
+                    if (textEl) textEl.textContent = `待同步 ${n}`;
+                    if (btn) btn.style.display = '';
+                } else {
+                    badge.classList.remove('unsynced', 'syncing');
+                    const numEl = document.getElementById('syncBadgeNum');
+                    if (numEl) numEl.style.display = 'none';
+                    const textEl = document.getElementById('syncStatusText');
+                    if (textEl) textEl.textContent = '已同步';
+                    if (btn) btn.style.display = 'none';
+                }
+            });
+        }
+
+        // ─── 云端同步器（Cloudflare D1，经 /api）──────────────────
+        async function flushPendingToSupabase() {
+            const pending = await idbGetPending();
+            pendingCache = pending; // 保持内存镜像与 DB 一致
+            if (!pending.length || !apiReady) return;
+
+            const badge = document.getElementById('syncStatusBadge');
+            const textEl = document.getElementById('syncStatusText');
+            if (badge) { badge.classList.add('syncing'); if (textEl) textEl.textContent = '同步中...'; }
+
+            try {
+                // 按 store 分组
+                const byStore = {};
+                for (const item of pending) {
+                    if (!byStore[item.store]) byStore[item.store] = { inserts: [], updates: [], deletes: [] };
+                    if (item.action === 'delete') byStore[item.store].deletes.push(item.data.id);
+                    else if (item.data.id) byStore[item.store].updates.push(item.data);
+                    else byStore[item.store].inserts.push(item.data);
+                }
+
+                // 并发执行所有 DB 操作（统一走同源 /api → D1）
+                await Promise.all(Object.entries(byStore).map(async ([store, ops]) => {
+                    const table = store; // store 即 'classes' | 'students' | 'records'，与 API 端点同名
+                    const all = ops.inserts.concat(ops.updates);
+                    if (all.length) await api.upsert(table, all);
+                    if (ops.deletes.length) {
+                        for (const id of ops.deletes) await api.remove(table, id);
+                    }
+                }));
+
+                await idbClearPending();
+                await refreshAllData(true); // 同步成功后强制从云端拉取最新
+                showToast('✅ 已同步到云端');
+            } catch (err) {
+                console.error('同步失败:', err);
+                showToast('同步失败，数据保留本地', true);
+                updateSyncBadge();
+            } finally {
+                if (badge) { badge.classList.remove('syncing'); updateSyncBadge(); }
+            }
+        }
+
+        // 防抖推送：每次本地改动后 1.5s 内自动推送到云端（解决同步慢）
+        let _flushTimer = null;
+        function scheduleFlush(delay = 1500) {
+            if (_flushTimer) clearTimeout(_flushTimer);
+            _flushTimer = setTimeout(() => {
+                _flushTimer = null;
+                flushPendingToSupabase().catch(console.error);
+            }, delay);
+        }
+
+        // 页面可见时自动同步（先推后拉）
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) setTimeout(() => syncNow().catch(console.error), 1000);
+        });
+        // 标签页关闭/隐藏时可靠推送一次：使用 fetch({keepalive:true})，
+        // 浏览器保证在页面卸载过程中仍把请求发完（普通 await fetch 会被 unload 掐断）。
+        // 即使本次仍未送达，pending 已持久化在 IndexedDB，下次打开会自动补推，不会丢数据。
+        function sendUnload(url, method, body) {
+            try {
+                fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+            } catch (e) {
+                // 极老浏览器回退到 sendBeacon（仅支持 POST）
+                if (method === 'POST' && navigator.sendBeacon) {
+                    try { navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })); } catch (_) {}
+                }
+            }
+        }
+        function flushOnExit() {
+            if (!apiReady) return;
+            const pending = pendingCache.length ? pendingCache : [];
+            if (!pending.length) return;
+            const byStore = {};
+            for (const item of pending) {
+                if (!byStore[item.store]) byStore[item.store] = { upserts: [], deletes: [] };
+                if (item.action === 'delete') byStore[item.store].deletes.push(item.data.id);
+                else byStore[item.store].upserts.push(item.data);
+            }
+            for (const [store, ops] of Object.entries(byStore)) {
+                if (ops.upserts.length) {
+                    sendUnload('/api/' + store, 'POST', JSON.stringify({ items: ops.upserts }));
+                }
+                for (const id of ops.deletes) {
+                    sendUnload('/api/' + store, 'DELETE', JSON.stringify({ id }));
+                }
+            }
+        }
+        window.addEventListener('pagehide', flushOnExit);
+        window.addEventListener('beforeunload', flushOnExit);
+        // 兜底轮询：每 15 秒拉取一次（实时 WebSocket 为主，轮询为容错）
+        setInterval(() => { if (!document.hidden) syncNow().catch(console.error); }, 15000);
+
+        // ─── 实时推送（Cloudflare Durable Object WebSocket 中枢）───
+        // 任一设备写入后，服务端会向所有在线设备广播 "changed"，本机收到后立即拉取最新数据，
+        // 实现近实时跨设备刷新；断线自动每 5 秒重连。
+        let wsRealtime = null;
+        let wsReconnectTimer = null;
+        let wsHeartbeatTimer = null;
+        let wsLivenessTimer = null;
+        let _rtFlushTimer = null;
+        function scheduleRealtimeSync(delay = 600) {
+            if (_rtFlushTimer) clearTimeout(_rtFlushTimer);
+            _rtFlushTimer = setTimeout(() => {
+                _rtFlushTimer = null;
+                syncNow().catch(console.error);
+            }, delay);
+        }
+        function updateRealtimeDot(connected) {
+            const dot = document.getElementById('rtDot');
+            if (dot) {
+                dot.classList.toggle('on', !!connected);
+                dot.title = connected ? '实时同步：已连接' : '实时同步：未连接（仍按定时同步）';
+            }
+        }
+        function stopWsTimers() {
+            if (wsHeartbeatTimer) { clearInterval(wsHeartbeatTimer); wsHeartbeatTimer = null; }
+            if (wsLivenessTimer) { clearTimeout(wsLivenessTimer); wsLivenessTimer = null; }
+        }
+        function connectRealtime() {
+            if (!apiReady) return;
+            if (wsRealtime && (wsRealtime.readyState === WebSocket.OPEN || wsRealtime.readyState === WebSocket.CONNECTING)) return;
+            try {
+                const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                // 关键：WebSocket 必须由承载 SyncHub 的 Worker 直接终止（/api/sync/* 路由到该 Worker），
+                // Pages Functions 无法稳定持有 Durable Object 的 WebSocket 长连接，故不能走 /api/events。
+                const ws = new WebSocket(proto + '//' + location.host + '/api/sync/events');
+                wsRealtime = ws;
+                ws.onopen = () => {
+                    console.log('🔌 实时同步已连接');
+                    updateRealtimeDot(true);
+                    // 应用层保活：每 25s 发 ping；并启动存活看门狗（60s 内无任何消息则强制重连）
+                    stopWsTimers();
+                    wsHeartbeatTimer = setInterval(() => {
+                        try { ws.send(JSON.stringify({ type: 'ping' })); } catch (e) {}
+                    }, 25000);
+                    wsLivenessTimer = setTimeout(() => {
+                        console.warn('实时同步心跳超时，强制重连');
+                        try { ws.close(); } catch (e) {}
+                    }, 60000);
+                };
+                ws.onmessage = (ev) => {
+                    // 收到任何消息都视为链路存活，重置看门狗
+                    if (wsLivenessTimer) {
+                        clearTimeout(wsLivenessTimer);
+                        wsLivenessTimer = setTimeout(() => { try { ws.close(); } catch (e) {} }, 60000);
+                    }
+                    try {
+                        const msg = JSON.parse(ev.data);
+                        if (msg && msg.type === 'changed') scheduleRealtimeSync();
+                    } catch (e) { /* 忽略非 JSON */ }
+                };
+                ws.onclose = () => { updateRealtimeDot(false); wsRealtime = null; stopWsTimers(); scheduleReconnect(); };
+                ws.onerror = () => { try { ws.close(); } catch (e) {} };
+            } catch (e) {
+                scheduleReconnect();
+            }
+        }
+        function scheduleReconnect() {
+            if (wsReconnectTimer) return;
+            wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; connectRealtime(); }, 5000);
+        }
+
+        // 防抖工具函数
+        function debounce(fn, delay) {
+            let timer = null;
+            return function(...args) {
+                clearTimeout(timer);
+                timer = setTimeout(() => fn.apply(this, args), delay);
+            };
+        }
+
+        // 班级 ID → name 快速查找（内存缓存）
+        function getClassMap() {
+            return Object.fromEntries(classes.map(c => [c.id, c.name]));
+        }
+        let classMap = new Map();
+        function refreshClassMap() { classMap = new Map(classes.map(c => [c.id, c.name])); }
+        function getClassNameById(classId) { return classMap.get(classId) || '未知班级'; }
+
+        // 记录 ID → record 快速查找（内存缓存）
+        let recordMap = new Map();
+        function refreshRecordMap() {
+            recordMap = new Map(records.map(r => [r.id, r]));
+        }
+
+        // 学生 ID → student 快速查找（内存缓存）
+        let studentMap = new Map();
+        function refreshStudentMap() {
+            studentMap = new Map(students.map(s => [s.id, s]));
+        }
+
+        // 生成课评时的学生勾选状态（独立于 DOM，重渲染不丢失）
+        const selectedStudentIds = new Set();
+        // 批量生成时的学生勾选状态（独立于 DOM，重渲染不丢失）
+        const selectedBatchIds = new Set();
+
+        // DOM 缓存（避免重复查询）
+        const DOMCache = {};
+        function cacheDOM(ids) {
+            for (const id of ids) {
+                DOMCache[id] = document.getElementById(id);
+            }
+        }
+        function cacheEl(el) { return el; }
+
+        // 网络状态检测
+        function updateNetworkStatus() {
+            const el = document.getElementById('networkStatus');
+            const textEl = document.getElementById('networkText');
+            if (!el) return;
+            if (navigator.onLine) {
+                el.className = 'network-status online';
+                if (textEl) textEl.textContent = '在线';
+            } else {
+                el.className = 'network-status offline';
+                if (textEl) textEl.textContent = '离线';
+            }
+        }
+        window.addEventListener('online', updateNetworkStatus);
+        window.addEventListener('offline', updateNetworkStatus);
+        updateNetworkStatus();
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toastMsg');
+            if (!toast) return;
+            toast.textContent = msg;
+            toast.className = 'toast' + (isError ? ' error' : '');
+            void toast.offsetWidth;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+        function escapeHtml(str) { if (!str) return ''; return String(str).replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m])); }
+        function generateStuId() { return 'S' + Date.now() + Math.floor(Math.random() * 10000); }
+
+        function setLoading(btn, loading) {
+            if (!btn) return;
+            if (loading) {
+                btn.dataset.origText = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading-spinner"></span> 处理中...';
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = btn.dataset.origText || '按钮';
+            }
+        }
+
+        function initApi() {
+            // 云端 API 走同源 /api（Cloudflare Pages Functions + D1），无需任何客户端密钥
+            apiReady = true;
+            api.ping().then(ok => { if (!ok) console.warn('⚠️ 云端 API 暂不可达，将使用本地缓存'); });
+        }
+
+        const TABLES = { classes: 'review_classes', students: 'review_students', records: 'review_records' };
+
+
+        let _cacheTs = { classes: 0, students: 0, records: 0 };
+        const CACHE_TTL = 60000;
+
+        // 生成跨设备低碰撞的 id（仍为合法 bigint：毫秒*1000 + 随机三位后缀，远小于 2^53 精度上限）
+        function genId() {
+            return Date.now() * 1000 + Math.floor(Math.random() * 1000);
+        }
+
+        // pull 云端数据时，把本机已新建但尚未上传到云端的数据合并回内存，
+        // 避免被云端返回的数据覆盖而导致本地新建记录"看不见"（先推后拉场景下 flush 失败时尤其重要）
+        async function mergeLocalInserts(store, cloudData) {
+            try {
+                const pendings = await idbGetPending();
+                const inserts = pendings.filter(p => p.store === store && p.action === 'insert').map(p => p.data);
+                const cloudIds = new Set(cloudData.map(d => d.id));
+                const extra = inserts.filter(d => d && d.id != null && !cloudIds.has(d.id));
+                return cloudData.concat(extra);
+            } catch (e) { return cloudData; }
+        }
+
+        async function loadClasses() {
+            if (idbDB && Date.now() - _cacheTs.classes < CACHE_TTL) {
+                const cached = await idbGetAll('classes');
+                if (cached.length) { classes = cached; refreshClassMap(); return classes; }
+            }
+            let result;
+            try { result = await api.list('classes'); }
+            catch (e) { showToast('加载班级失败: ' + e.message, true); return classes; }
+            result = result || [];
+            result = await mergeLocalInserts('classes', result);
+            classes = result;
+            _cacheTs.classes = Date.now();
+            // 写入 IndexedDB
+            for (const c of classes) await idbPut('classes', c);
+            refreshClassMap();
+            refreshStudentMap();
+            refreshRecordMap();
+            return classes;
+        }
+        async function loadStudents() {
+            if (idbDB && Date.now() - _cacheTs.students < CACHE_TTL) {
+                const cached = await idbGetAll('students');
+                if (cached.length) return cached;
+            }
+            let result;
+            try { result = await api.list('students'); }
+            catch (e) { showToast('加载学生失败: ' + e.message, true); return students; }
+            result = result || [];
+            result = await mergeLocalInserts('students', result);
+            students = result;
+            _cacheTs.students = Date.now();
+            for (const s of students) await idbPut('students', s);
+            refreshStudentMap();
+            return result;
+        }
+        async function loadRecords() {
+            if (idbDB && Date.now() - _cacheTs.records < CACHE_TTL) {
+                const cached = await idbGetAll('records');
+                if (cached.length) return cached;
+            }
+            let result;
+            try { result = await api.list('records'); }
+            catch (e) { showToast('加载记录失败: ' + e.message, true); return records; }
+            result = result || [];
+            result = await mergeLocalInserts('records', result);
+            records = result;
+            _cacheTs.records = Date.now();
+            for (const r of records) await idbPut('records', r);
+            refreshRecordMap();
+            return result;
+        }
+        async function refreshAllData(force) {
+            try {
+                if (force) { _cacheTs.classes = _cacheTs.students = _cacheTs.records = 0; }
+                classes = await loadClasses();
+                students = await loadStudents();
+                records = await loadRecords();
+                renderAllByTab();
+            } catch (err) {
+                console.error(err);
+                showToast('数据加载失败', true);
+            }
+        }
+        // 同步：先推送本地 pending 到云端，再强制从云端拉取最新（解决多设备同步）
+        async function syncNow() {
+            try {
+                const pending = await idbGetPending();
+                if (pending.length) {
+                    await flushPendingToSupabase(); // 内部成功后已强制下拉云端
+                } else {
+                    await refreshAllData(true); // 本机无改动也要拉取其他设备的数据
+                }
+                updateSyncBadge();
+            } catch (err) {
+                console.error('同步失败', err);
+            }
+        }
+        // 只刷新对应表并局部渲染，避免每次操作都全量重拉
+        async function refreshClassData() {
+            classes = await loadClasses();
+            refreshClassSelects();
+            renderClassList();
+        }
+        async function refreshStudentData() {
+            students = await loadStudents();
+            refreshClassSelects();
+            refreshStudentTable();
+        }
+        async function refreshRecordData() {
+            records = await loadRecords();
+            refreshRecordList();
+        }
+        async function refreshMonthlyData() {
+            students = await loadStudents();
+            refreshMonthlyStudentSelect();
+        }
+
+        async function addOrUpdateClass(id, name) {
+            if (id) {
+                const idx = classes.findIndex(c => c.id === id);
+                if (idx !== -1) classes[idx].name = name;
+                else classes.push({ id, name });
+                await idbPut('classes', { id, name });
+                await idbPutPending('update', 'classes', { id, name });
+            } else {
+                const newClass = { id: genId(), name };
+                classes.push(newClass);
+                await idbPut('classes', newClass);
+                await idbPutPending('insert', 'classes', newClass);
+            }
+            _cacheTs.classes = Date.now();
+            refreshClassMap();
+            refreshClassSelects();
+            renderClassList();
+            showToast(id ? '班级已更新' : '班级已添加');
+        }
+        async function deleteClassById(classId) {
+            const relatedStudents = students.filter(s => s.classId === classId);
+            const relatedStudentIds = new Set(relatedStudents.map(s => s.id));
+            // 立即保存关联记录，再过滤（不能先过滤后找记录）
+            const recordsToDelete = records.filter(r => relatedStudentIds.has(r.studentId));
+            // 立即从内存移除
+            classes = classes.filter(c => c.id !== classId);
+            students = students.filter(s => s.classId !== classId);
+            records = records.filter(r => !relatedStudentIds.has(r.studentId));
+            _cacheTs.classes = _cacheTs.students = _cacheTs.records = Date.now();
+            // 写入 IndexedDB 删除标记
+            await idbDelete('classes', classId);
+            for (const stu of relatedStudents) await idbDelete('students', stu.id);
+            for (const rec of recordsToDelete) await idbDelete('records', rec.id);
+            // 入队待同步（先删记录，再删学生，最后删班级）
+            for (const rec of recordsToDelete) {
+                await idbPutPending('delete', 'records', { id: rec.id });
+            }
+            for (const stu of relatedStudents) {
+                await idbPutPending('delete', 'students', { id: stu.id });
+            }
+            await idbPutPending('delete', 'classes', { id: classId });
+            refreshClassMap();
+            refreshStudentMap();
+            refreshRecordMap();
+            refreshClassSelects();
+            renderClassList();
+            refreshStudentTable();
+            refreshRecordList();
+            showToast('班级及关联数据已删除');
+        }
+        async function addOrUpdateStudent(student) {
+            if (student.id) {
+                const idx = students.findIndex(s => s.id === student.id);
+                if (idx !== -1) students[idx] = { ...students[idx], ...student };
+                else students.push(student);
+                // 同步更新关联记录的学生名和班级
+                const updatedRecordData = { studentName: student.name, classId: student.classId };
+                records = records.map(r => r.studentId === student.id ? { ...r, ...updatedRecordData } : r);
+                // 写 IndexedDB
+                await idbPut('students', student);
+                await idbPutPending('update', 'students', student);
+                for (const r of records.filter(rec => rec.studentId === student.id)) {
+                    r.studentName = student.name;
+                    r.classId = student.classId;
+                    await idbPut('records', r);
+                    await idbPutPending('update', 'records', r);
+                }
+            } else {
+                const newStudent = { id: genId(), ...student };
+                students.push(newStudent);
+                await idbPut('students', newStudent);
+                await idbPutPending('insert', 'students', newStudent);
+            }
+            _cacheTs.students = _cacheTs.records = Date.now();
+            refreshStudentMap();
+            refreshRecordMap();
+            refreshClassSelects();
+            refreshStudentTable();
+        }
+        async function deleteStudentById(id) {
+            // 立即保存关联记录，再过滤
+            const recordsToDelete = records.filter(r => r.studentId === id);
+            // 立即从内存移除
+            students = students.filter(s => s.id !== id);
+            records = records.filter(r => r.studentId !== id);
+            _cacheTs.students = _cacheTs.records = Date.now();
+            // 写 IndexedDB + 入队
+            await idbDelete('students', id);
+            for (const r of recordsToDelete) {
+                await idbDelete('records', r.id);
+                await idbPutPending('delete', 'records', { id: r.id });
+            }
+            await idbPutPending('delete', 'students', { id });
+            refreshStudentTable();
+            showToast('学生已删除');
+        }
+        async function deleteStudentsBatch(ids) {
+            const idSet = new Set(ids);
+            // 立即保存关联记录，再过滤
+            const recordsToDelete = records.filter(r => idSet.has(r.studentId));
+            // 立即从内存移除
+            students = students.filter(s => !idSet.has(s.id));
+            records = records.filter(r => !idSet.has(r.studentId));
+            _cacheTs.students = _cacheTs.records = Date.now();
+            refreshStudentMap();
+            refreshRecordMap();
+            // 写 IndexedDB + 入队
+            for (const id of ids) {
+                await idbDelete('students', id);
+                await idbPutPending('delete', 'students', { id });
+            }
+            for (const r of recordsToDelete) {
+                await idbDelete('records', r.id);
+                await idbPutPending('delete', 'records', { id: r.id });
+            }
+            refreshStudentTable();
+            showToast(`已删除 ${ids.length} 名学生`);
+        }
+        // 解析课堂内容：提取《》内为主题，知识点包括 之后为课堂内容
+        // 兼容三种写法：
+        //   1) 《主题》知识点包括：内容
+        //   2) 知识点包括：内容（无主题）
+        //   3) 纯文本（整段当作课堂内容，主题留空）
+        function parseClassContent(raw) {
+            const text = (raw || '').trim();
+            let topic = '';
+            let content = text;
+            const topicMatch = text.match(/《(.+?)》/);
+            if (topicMatch) { topic = topicMatch[1].trim(); }
+            const kwIdx = text.indexOf('知识点包括');
+            if (kwIdx !== -1) {
+                const after = text.slice(kwIdx + '知识点包括'.length);
+                // 去掉紧跟的冒号/全角冒号
+                content = after.replace(/^[\s：:]+/, '').trim();
+                // 若前面有《主题》，内容里不再保留《》部分之前的文字
+                if (topic) {
+                    const topicEnd = text.indexOf('》', topicMatch.index);
+                    const beforeKw = text.slice(topicEnd + 1, kwIdx).replace(/知识点包括/, '');
+                    if (beforeKw.trim() === '') content = content; // 已在 after 中
+                }
+            } else if (topic) {
+                // 有《主题》但无"知识点包括"，取《》之后的文字为内容
+                const topicEnd = text.indexOf('》', topicMatch.index);
+                content = text.slice(topicEnd + 1).trim();
+            }
+            if (!content) content = text; // 兜底
+            return { classTopic: topic, classContent: content };
+        }
+
+        // 本地当前时间格式化（避免 toISOString 的 UTC 偏移）
+        function nowLocalInput() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        }
+        function nowLocalFull() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+        }
+
+        async function saveRecordToDB(record) {
+            const recordForDb = {
+                id: Math.floor(Number(record.id)),
+                studentId: Number(record.studentId),
+                studentName: String(record.studentName),
+                classId: Number(record.classId),
+                classContent: String(record.classContent),
+                classTopic: String(record.classTopic || ''),
+                reviewText: String(record.reviewText),
+                recorddate: String(record.recordDate || record.recorddate)
+            };
+            if (recordForDb.id) {
+                const idx = records.findIndex(r => r.id === recordForDb.id);
+                if (idx !== -1) records[idx] = recordForDb;
+                else records.unshift(recordForDb);
+                await idbPut('records', recordForDb);
+                await idbPutPending('update', 'records', recordForDb);
+            } else {
+                records.unshift(recordForDb);
+                await idbPut('records', recordForDb);
+                await idbPutPending('insert', 'records', recordForDb);
+            }
+            _cacheTs.records = Date.now();
+            refreshRecordMap();
+            refreshRecordList();
+            showToast('已保存到本地');
+        }
+        async function deleteRecordById(recordId) {
+            // 立即从内存移除
+            records = records.filter(r => r.id !== recordId);
+            _cacheTs.records = Date.now();
+            refreshRecordMap();
+            await idbDelete('records', recordId);
+            await idbPutPending('delete', 'records', { id: recordId });
+            refreshRecordList();
+            showToast('已删除');
+        }
+        async function deleteRecordsBatch(ids) {
+            const idSet = new Set(ids);
+            // 立即从内存移除
+            records = records.filter(r => !idSet.has(r.id));
+            _cacheTs.records = Date.now();
+            refreshRecordMap();
+            for (const id of ids) {
+                await idbDelete('records', id);
+                await idbPutPending('delete', 'records', { id });
+            }
+            refreshRecordList();
+            showToast(`已删除 ${ids.length} 条记录`);
+        }
+        async function addManualRecord(studentId, studentName, classId, classContent, reviewText, recordDate, classTopic = '') {
+            await saveRecordToDB({ id: genId(), studentId, studentName, classId, classContent, classTopic, reviewText, recordDate });
+        }
+
+        function renderAllByTab() {
+            if (currentTab === 'config') {
+                renderClassList();
+                refreshClassSelects();
+                refreshStudentTable();
+            } else if (currentTab === 'record') {
+                refreshStudentSelectors();
+                refreshRecordList();
+            } else if (currentTab === 'monthly') {
+                refreshMonthlyStudentSelect();
+            }
+        }
+
+        function renderClassList() {
+            const container = document.getElementById('classListContainer');
+            if (!container) return;
+            container.innerHTML = classes.map(cls => `<span class="student-tag">${escapeHtml(cls.name)} <button class="editClassBtn" data-id="${cls.id}" style="background:none;border:none;cursor:pointer;color:var(--primary);">✏️</button> <button class="delClassBtn" data-id="${cls.id}" style="background:none;border:none;cursor:pointer;color:var(--danger);">🗑️</button></span>`).join('');
+        }
+        // 事件委托：班级列表按钮点击（延迟绑定，确保 DOM 就绪）
+        function bindClassListEvents() {
+            const container = document.getElementById('classListContainer');
+            if (!container) return;
+            container.addEventListener('click', function(e) {
+                const btn = e.target.closest('.editClassBtn, .delClassBtn');
+                if (!btn) return;
+                e.stopPropagation();
+                const id = parseInt(btn.dataset.id);
+                if (btn.classList.contains('editClassBtn')) {
+                    const cls = classMap.get(id) ? { id, name: classMap.get(id) } : null;
+                    const newName = prompt('编辑班级名称', cls?.name);
+                    if (newName && newName.trim()) addOrUpdateClass(id, newName.trim());
+                } else {
+                    if (confirm('删除班级将清空该班级所有学生及课评，确定吗？')) deleteClassById(id);
+                }
+            });
+        }
+        function refreshClassSelects() {
+            ['stuClassSelect', 'filterClassSelect', 'classFilterSelectGen', 'monthlyClassFilter', 'recordClassFilter'].forEach(id => {
+                const sel = document.getElementById(id);
+                if (sel) {
+                    sel.innerHTML = '<option value="">全部班级</option>' + classes.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+                }
+            });
+        }
+        async function refreshStudentTable() {
+            const classId = document.getElementById('filterClassSelect').value;
+            const nameSearch = document.getElementById('searchNameInput').value.trim().toLowerCase();
+            let filtered = students.filter(s => (!classId || s.classId == classId) && (!nameSearch || s.name.toLowerCase().includes(nameSearch)));
+            const tbody = document.getElementById('studentTbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            if (filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">暂无学生</td></tr>'; return; }
+            filtered.forEach(s => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td><input type="checkbox" class="student-checkbox" value="${s.id}"></td><td>${escapeHtml(s.stuId)}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(getClassNameById(s.classId))}</td><td><button class="btn-secondary btn-sm editStudentBtn" data-id="${s.id}">编辑</button> <button class="btn-danger btn-sm delStudentBtn" data-id="${s.id}">删除</button></td>`;
+                tbody.appendChild(tr);
+            });
+            // 全选复选框
+            const selectAll = document.getElementById('selectAllStudentsCheckbox');
+            if (selectAll) selectAll.onclick = (e) => document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = e.target.checked);
+        }
+        function editStudentById(id) {
+            const stu = studentMap.get(id);
+            if (stu) {
+                document.getElementById('stuName').value = stu.name;
+                document.getElementById('stuClassSelect').value = stu.classId;
+                const addBtn = document.getElementById('addStudentBtn');
+                addBtn.innerText = '✏️ 更新学生';
+                addBtn.dataset.editId = id;
+            }
+        }
+        async function handleAddOrUpdateStudent() {
+            const name = document.getElementById('stuName').value.trim();
+            const classId = parseInt(document.getElementById('stuClassSelect').value);
+            if (!name || !classId) { showToast('请填写姓名和班级', true); return; }
+            const addBtn = document.getElementById('addStudentBtn');
+            if (addBtn.dataset.editId) {
+                const id = parseInt(addBtn.dataset.editId);
+                const oldStu = studentMap.get(id);
+                await addOrUpdateStudent({ id, stuId: oldStu.stuId, name, classId });
+                delete addBtn.dataset.editId;
+                addBtn.innerText = '➕ 添加学生';
+            } else {
+                await addOrUpdateStudent({ stuId: generateStuId(), name, classId });
+            }
+            document.getElementById('stuName').value = '';
+            showToast('保存成功');
+        }
+        async function batchDeleteStudents() {
+            const checked = Array.from(document.querySelectorAll('.student-checkbox:checked'));
+            if (!checked.length) { showToast('请选择学生', true); return; }
+            if (confirm(`确定删除 ${checked.length} 名学生及其所有记录？`)) {
+                await deleteStudentsBatch(checked.map(cb => parseInt(cb.value)));
+            }
+        }
+
+        function refreshStudentSelectors() {
+            const classFilter = document.getElementById('classFilterSelectGen').value;
+            const nameFilter = document.getElementById('nameFilterSelectGen').value.trim().toLowerCase();
+            let filtered = students.filter(s => (!classFilter || s.classId == classFilter) && (!nameFilter || s.name.toLowerCase().includes(nameFilter)));
+            const container = document.getElementById('studentChecklist');
+            if (!container) return;
+            if (filtered.length === 0) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">暂无学生</div>'; return; }
+            container.innerHTML = filtered.map(s => `<label class="student-tag"><input type="checkbox" class="stuCheckItem" value="${s.id}" ${selectedStudentIds.has(parseInt(s.id)) ? 'checked' : ''}> ${escapeHtml(s.name)} (${getClassNameById(s.classId)})</label>`).join('');
+            renderIndividualPerfInputs(filtered);
+        }
+        function renderIndividualPerfInputs(filteredStudents) {
+            const area = document.getElementById('individualPerfArea');
+            if (!area) return;
+            if (filteredStudents.length === 0) { area.innerHTML = ''; return; }
+            area.innerHTML = filteredStudents.map(s => {
+                const saved = individualPerfMap[s.id] || '';
+                return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:80px;font-weight:600;">${escapeHtml(s.name)}</span><input type="text" class="ind-perf-input" data-id="${s.id}" placeholder="特殊表现（选填）" value="${escapeHtml(saved)}" style="flex:1;"></div>`;
+            }).join('');
+        }
+        // 事件委托：特殊表现输入框（绑定一次即可）
+        const perfArea = document.getElementById('individualPerfArea');
+        if (perfArea) {
+            perfArea.addEventListener('change', function(e) {
+                if (e.target.classList.contains('ind-perf-input')) {
+                    individualPerfMap[parseInt(e.target.dataset.id)] = e.target.value.trim();
+                }
+            });
+        }
+        function countChineseChars(text) {
+            const chinese = text.match(/[\u4e00-\u9fa5]/g);
+            return chinese ? chinese.length : 0;
+        }
+
+        async function generatePreviews() {
+            const classContent = document.getElementById('classContentInput').value.trim();
+            if (!classContent) { showToast('请填写课堂内容', true); return; }
+            const parsedContent = parseClassContent(classContent);
+            const selectedBoxes = Array.from(document.querySelectorAll('.stuCheckItem:checked'));
+            if (!selectedBoxes.length) { showToast('请至少选择一位学生', true); return; }
+            const targetWords = parseInt(document.getElementById('wordSlider').value);
+            const generalPerf = document.getElementById('generalPerf').value.trim();
+            const apiConfig = {
+                apiKey: document.getElementById('apiKey').value.trim(),
+                modelId: document.getElementById('modelId').value.trim(),
+                endpoint: document.getElementById('endpoint').value.trim()
+            };
+            if (!apiConfig.apiKey || !apiConfig.modelId) { showToast('请先配置豆包API', true); return; }
+
+            const genBtn = document.getElementById('generatePreviewBtn');
+            setLoading(genBtn, true);
+            const container = document.getElementById('generatedPreviews');
+            container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">⏳ 正在生成课评...</div>';
+
+            const studentList = [];
+            for (const cb of selectedBoxes) {
+                const student = studentMap.get(parseInt(cb.value)) || studentMap.get(cb.value);
+                if (student) studentList.push({ id: student.id, name: student.name, classId: student.classId, perf: individualPerfMap[student.id] || generalPerf || '', classTopic: parsedContent.classTopic, classContent: parsedContent.classContent });
+            }
+            if (!studentList.length) { showToast('未找到有效学生', true); setLoading(genBtn, false); return; }
+
+            // 显示进度条 + 进度文本
+            const progressWrap = document.getElementById('previewProgressBar');
+            if (!progressWrap) {
+                const progDiv = document.createElement('div');
+                progDiv.className = 'progress-bar-wrap show';
+                progDiv.id = 'previewProgressBar';
+                progDiv.innerHTML = '<div class="progress-bar-fill" id="previewProgressBarFill"></div>';
+                container.parentNode.insertBefore(progDiv, container);
+                const txt = document.createElement('div');
+                txt.id = 'previewProgressText';
+                txt.style.cssText = 'font-size:12px;color:var(--text-muted);margin-top:4px;min-height:16px;';
+                container.parentNode.insertBefore(txt, container);
+            }
+            const progFill = document.getElementById('previewProgressBarFill');
+            const progressSpan = document.getElementById('previewProgressText');
+            if (progFill) progFill.style.width = '10%';
+
+            async function fetchReview(student, maxRetries = 2) {
+                const perfInfo = student.perf || '无特别说明';
+                const temperature = 0.7 + Math.random() * 0.4;
+                const prompt = `请为"${student.name}"同学写一段课后评语：
+
+1. 开头以"${student.name}本节课……"开始，围绕课堂内容"${classContent}"展开
+2. 严格控制在${targetWords}字左右（正负不超过3字）
+3. 风格：口语化，自然真实，像老师随口聊
+4. 基于该生表现："${perfInfo}"
+5. 全文不能出现"你""她""他"字，直接用名字或"该生"
+6. 多加合适的表情符号（如😊或👍）
+7. 确保评语针对本节课"${classContent}"专属评价
+8. 如果同时为多名学生生成，确保评语用语、句式、侧重点明显不同
+9. 严禁出现"今天学习了什么"这类总结式表述，也严禁出现"主题"二字（不要写"本节课的主题是……""本堂课的主题是……"等）
+10. 写成连贯的一段口语化评语，不要用标题、分点、冒号列举等格式化写法
+
+直接输出评语文本，不加任何解释。`;
+
+                for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                    try {
+                        const res = await fetch(apiConfig.endpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+                            body: JSON.stringify({ model: apiConfig.modelId, messages: [{ role: 'user', content: prompt }], max_tokens: Math.min(600, targetWords * 2 + 80), temperature, top_p: 0.92 })
+                        });
+                        if (!res.ok) throw new Error(`API请求失败(${res.status})`);
+                        const data = await res.json();
+                        let review = data.choices?.[0]?.message?.content?.trim() || '生成失败';
+                        review = review.replace(/[你她他]/g, student.name);
+                        if (!review.startsWith(student.name)) review = student.name + '本节课' + review.replace(/^[^，。,.]*[，。,.]?\s*/, '');
+                        const charCount = countChineseChars(review);
+                        if (Math.abs(charCount - targetWords) <= 5 || attempt === maxRetries) {
+                            return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: review, charCount };
+                        }
+                    } catch (err) {
+                        if (attempt === maxRetries) return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: `生成失败: ${err.message}`, charCount: 0 };
+                    }
+                }
+                return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: '生成失败', charCount: 0 };
+            }
+
+            const concurrencyLimit = 3;
+            const results = [];
+            const queue = [...studentList];
+            let completed = 0;
+
+            async function worker() {
+                while (queue.length) {
+                    const student = queue.shift();
+                    const result = await fetchReview(student);
+                    results.push(result);
+                    completed++;
+                    // 更新进度条
+                    const pct = Math.round(completed / studentList.length * 100);
+                    if (progressSpan) progressSpan.textContent = `进度: ${completed}/${studentList.length} (${pct}%)`;
+                    if (progFill) progFill.style.width = pct + '%';
+                }
+            }
+            try {
+                await Promise.all(Array(Math.min(concurrencyLimit, studentList.length)).fill().map(() => worker()));
+            } catch (err) {
+                console.error('生成异常:', err);
+                setLoading(genBtn, false);
+                showToast('生成过程出错: ' + (err && err.message ? err.message : err), true);
+                return;
+            }
+
+            // 全部完成后一次性渲染，避免反复改写容器
+            if (progFill) progFill.style.width = '100%';
+            setTimeout(() => { if (progFill) progFill.style.width = '0%'; }, 1000);
+
+            const orderedResults = studentList.map(st => {
+                const found = results.find(r => r.studentId === st.id);
+                // 保存时统一用拆分后的主题/课堂内容（found 里不含拆分字段，避免覆盖）
+                return {
+                    studentId: st.id, studentName: st.name, classId: st.classId,
+                    classTopic: st.classTopic, classContent: st.classContent,
+                    reviewText: found ? found.reviewText : '生成失败',
+                    charCount: found ? found.charCount : 0
+                };
+            });
+
+            container.innerHTML = orderedResults.map((res, idx) => {
+                const wordInfo = res.charCount ? `<span style="font-size:12px;color:var(--text-muted);margin-left:8px;">(${res.charCount}字)</span>` : '';
+                return `<div class="result-card" data-idx="${idx}">
+                    <div class="result-header">
+                        <strong>👩‍🎓 ${escapeHtml(res.studentName)} ${wordInfo}</strong>
+                        <div class="btn-group">
+                            <button class="btn-secondary btn-sm copy-single-btn" data-idx="${idx}">📋 复制</button>
+                            <button class="btn-success btn-sm save-single-btn" data-idx="${idx}">💾 保存</button>
+                        </div>
+                    </div>
+                    <textarea class="gen-card-content" data-idx="${idx}" rows="4" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:10px;">${escapeHtml(res.reviewText)}</textarea>
+                </div>`;
+            }).join('');
+
+            // 事件委托：生成的卡片按钮（用容器的点击事件统一处理，避免逐个绑定）
+            container.addEventListener('click', function(e) {
+                const copyBtn = e.target.closest('.copy-single-btn');
+                if (copyBtn) {
+                    e.stopPropagation();
+                    const idx = parseInt(copyBtn.dataset.idx);
+                    const textarea = container.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
+                    const res = orderedResults[idx];
+                    if (textarea && res) {
+                        navigator.clipboard.writeText(textarea.value);
+                        showToast(`已复制 ${res.studentName}`);
+                    }
+                    return;
+                }
+                const saveBtn = e.target.closest('.save-single-btn');
+                if (saveBtn) {
+                    e.stopPropagation();
+                    const idx = parseInt(saveBtn.dataset.idx);
+                    const textarea = container.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
+                    const res = orderedResults[idx];
+                    if (!textarea || !res) return;
+                    const finalReview = textarea.value.trim();
+                    if (finalReview.includes('生成失败')) { showToast('课评无效', true); return; }
+                    const now = new Date();
+                    saveRecordToDB({
+                        id: genId(), studentId: res.studentId, studentName: res.studentName,
+                        classId: res.classId, classTopic: res.classTopic, classContent: res.classContent, reviewText: finalReview,
+                        recordDate: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
+                    }).catch(console.error).then(() => {
+                        showToast(`已保存 ${res.studentName}`);
+                        const card = container.querySelector(`.result-card[data-idx="${idx}"]`);
+                        if (card) card.remove();
+                    });
+                }
+            });
+
+            setLoading(genBtn, false);
+            showToast(`✅ 生成完成，共 ${orderedResults.length} 份课评`);
+        }
+
+        async function refreshRecordList() {
+            const classFilterVal = document.getElementById('recordClassFilter').value;
+            const nameFilterVal = document.getElementById('recordNameSearch').value.trim().toLowerCase();
+            const dateFrom = document.getElementById('recordDateFrom').value;
+            const dateTo = document.getElementById('recordDateTo').value;
+            let filtered = records.filter(r => {
+                if (classFilterVal && r.classId != classFilterVal) return false;
+                if (nameFilterVal && !r.studentName.toLowerCase().includes(nameFilterVal)) return false;
+                if (dateFrom && r.recorddate && r.recorddate.slice(0,10) < dateFrom) return false;
+                if (dateTo && r.recorddate && r.recorddate.slice(0,10) > dateTo) return false;
+                return true;
+            });
+            const tbody = document.getElementById('recordTbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted);">暂无记录</td></tr>'; return; }
+            // 按时间降序排序（最新在上，无时间兜底置底）
+            filtered.sort((a, b) => {
+                const ta = a.recorddate || '';
+                const tb = b.recorddate || '';
+                if (!ta && !tb) return 0;
+                if (!ta) return 1;
+                if (!tb) return -1;
+                return ta > tb ? -1 : (ta < tb ? 1 : 0);
+            });
+            filtered.forEach(rec => {
+                const dateValue = rec.recorddate ? rec.recorddate.replace(' ', 'T') : '';
+                const tr = document.createElement('tr');
+                tr.classList.add('record-table-card');
+                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent">${escapeHtml(rec.classContent)}</td><td class="editable-field" data-id="${rec.id}" data-field="reviewText">${escapeHtml(rec.reviewText.substring(0, 60))}${rec.reviewText.length>60?'…':''}</td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
+                tbody.appendChild(tr);
+            });
+        }
+        async function batchDeleteRecords() {
+            const checked = Array.from(document.querySelectorAll('.record-checkbox:checked')).map(cb => parseInt(cb.value));
+            if (!checked.length) { showToast('请选择记录', true); return; }
+            if (confirm(`删除 ${checked.length} 条记录？`)) { await deleteRecordsBatch(checked); showToast('已删除'); }
+        }
+        function selectAllRecords() {
+            document.querySelectorAll('.record-checkbox').forEach(cb => cb.checked = document.getElementById('recordSelectAllCheckbox').checked);
+        }
+        function batchEditSelected() {
+            const checked = Array.from(document.querySelectorAll('.record-checkbox:checked')).map(cb => parseInt(cb.value));
+            if (!checked.length) { showToast('请选择记录', true); return; }
+            document.getElementById('batchEditClassContent').value = '';
+            document.getElementById('batchEditReviewText').value = '';
+            document.getElementById('batchEditModal').dataset.ids = JSON.stringify(checked);
+            document.getElementById('batchEditModal').classList.add('show');
+        }
+        async function confirmBatchEdit() {
+            const modal = document.getElementById('batchEditModal');
+            const ids = JSON.parse(modal.dataset.ids || '[]');
+            if (!ids.length) { showToast('无选中记录', true); return; }
+            const newClassContent = document.getElementById('batchEditClassContent').value.trim();
+            const newReviewText = document.getElementById('batchEditReviewText').value.trim();
+            if (!newClassContent && !newReviewText) { showToast('请至少填写一项', true); return; }
+            // 一次性更新所有记录（本地优先）
+            const updatedRecords = records.filter(r => ids.includes(r.id)).map(async rec => {
+                if (newClassContent) rec.classContent = newClassContent;
+                if (newReviewText) rec.reviewText = newReviewText;
+                const recordForDb = {
+                    id: Math.floor(Number(rec.id)),
+                    studentId: Number(rec.studentId),
+                    studentName: String(rec.studentName),
+                    classId: Number(rec.classId),
+                    classContent: String(rec.classContent),
+                    reviewText: String(rec.reviewText),
+                    recorddate: String(rec.recorddate)
+                };
+                const idx = records.findIndex(r => r.id === rec.id);
+                if (idx !== -1) records[idx] = recordForDb;
+                await idbPut('records', recordForDb);
+                await idbPutPending('update', 'records', recordForDb);
+                return recordForDb;
+            });
+            await Promise.all(updatedRecords);
+            _cacheTs.records = Date.now();
+            showToast(`已更新 ${ids.length} 条记录`);
+            modal.classList.remove('show');
+            refreshRecordList();
+        }
+        async function batchDeleteFiltered() {
+            const classFilterVal = document.getElementById('recordClassFilter').value;
+            const nameFilterVal = document.getElementById('recordNameSearch').value.trim().toLowerCase();
+            const dateFrom = document.getElementById('recordDateFrom').value;
+            const dateTo = document.getElementById('recordDateTo').value;
+            let filtered = records.filter(r => {
+                if (classFilterVal && r.classId != classFilterVal) return false;
+                if (nameFilterVal && !r.studentName.toLowerCase().includes(nameFilterVal)) return false;
+                if (dateFrom && r.recorddate && r.recorddate.slice(0,10) < dateFrom) return false;
+                if (dateTo && r.recorddate && r.recorddate.slice(0,10) > dateTo) return false;
+                return true;
+            });
+            if (!filtered.length) { showToast('当前条件下无记录', true); return; }
+            if (confirm(`删除 ${filtered.length} 条记录？此操作不可恢复！`)) {
+                await deleteRecordsBatch(filtered.map(r => r.id));
+                showToast(`已删除 ${filtered.length} 条记录`);
+            }
+        }
+
+        async function refreshMonthlyStudentSelect() {
+            const classFilter = document.getElementById('monthlyClassFilter').value;
+            const nameSearch = document.getElementById('monthlyNameSearch').value.trim().toLowerCase();
+            let filtered = students.filter(s => (!classFilter || s.classId == classFilter) && (!nameSearch || s.name.toLowerCase().includes(nameSearch)));
+            const sel = document.getElementById('studentSelect');
+            if (sel) {
+                if (!filtered.length) { sel.innerHTML = '<option value="">暂无学生</option>'; }
+                else { sel.innerHTML = '<option value="">请选择学生</option>' + filtered.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${getClassNameById(s.classId)})</option>`).join(''); }
+            }
+            if (filtered.length === 1 && sel) sel.value = filtered[0].id;
+            renderBatchStudentList();
+        }
+        async function viewMonthRecords() {
+            const studentId = parseInt(document.getElementById('studentSelect').value);
+            const monthVal = document.getElementById('monthPicker').value;
+            if (!studentId || !monthVal) { showToast('请选择学生和月份', true); return; }
+            const monthRecords = records.filter(r => r.studentId === studentId && r.recorddate && r.recorddate.startsWith(monthVal));
+            const contents = [...new Set(monthRecords.map(r => r.classContent))];
+            document.getElementById('classContentSummary').innerHTML = contents.map(c => `• ${escapeHtml(c)}`).join('<br>') || '无记录';
+            document.getElementById('monthlySummaryEditable').value = monthRecords.map(r => `【${r.recorddate.slice(5,10)}】${r.reviewText}`).join('\n\n') || '暂无课评记录';
+        }
+        async function generateMonthlySummary() {
+            const studentId = parseInt(document.getElementById('studentSelect').value);
+            const monthVal = document.getElementById('monthPicker').value;
+            const targetWords = parseInt(document.getElementById('monthWordSlider').value);
+            if (!studentId || !monthVal) { showToast('请选择学生和月份', true); return; }
+            const monthRecords = records.filter(r => r.studentId === studentId && r.recorddate && r.recorddate.startsWith(monthVal));
+            if (!monthRecords.length) { showToast('本月无记录', true); return; }
+            const apiConfig = { apiKey: document.getElementById('apiKey').value.trim(), modelId: document.getElementById('modelId').value.trim(), endpoint: document.getElementById('endpoint').value.trim() };
+            if (!apiConfig.apiKey || !apiConfig.modelId) { showToast('请先配置豆包API', true); return; }
+            const rawFeedback = monthRecords.map(r => `- ${r.reviewText}`).join('\n');
+            const genBtn = document.getElementById('generateSummaryBtn');
+            setLoading(genBtn, true);
+            try {
+                const res = await fetch(apiConfig.endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+                    body: JSON.stringify({ model: apiConfig.modelId, messages: [{ role: 'system', content: `将课评整合成约${targetWords}字月度总结，不要用"你"字，写成自然段。严禁出现"今天学习了什么"这类表述，也严禁出现"主题"二字，不要分点列举。` }, { role: 'user', content: `原始课评：\n${rawFeedback}` }], temperature: 0.7 })
+                });
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                let summary = data.choices?.[0]?.message?.content?.trim() || '生成失败';
+                summary = summary.replace(/你/g, studentMap.get(studentId)?.name || '该生');
+                document.getElementById('monthlySummaryEditable').value = summary;
+                showToast('整合成功');
+            } catch (e) {
+                showToast('整合失败', true);
+            } finally {
+                setLoading(genBtn, false);
+            }
+        }
+
+        // 批量学生卡片点击事件委托（绑定一次，不重复绑定）
+        document.addEventListener('click', function(e) {
+            const card = e.target.closest('.batch-student-card');
+            if (!card) return;
+            const cb = card.querySelector('input[type="checkbox"]');
+            if (e.target !== cb) cb.checked = !cb.checked; // 点卡片本体翻转；点 checkbox 用原生状态
+            card.classList.toggle('checked', cb.checked);
+            const id = parseInt(cb.value);
+            if (cb.checked) selectedBatchIds.add(id);
+            else selectedBatchIds.delete(id);
+            updateBatchSelectedCount();
+        });
+        function renderBatchStudentList() {
+            const container = document.getElementById('batchStudentListContainer');
+            if (!container) return;
+            const classFilter = document.getElementById('monthlyClassFilter')?.value || '';
+            const nameSearch = document.getElementById('monthlyNameSearch')?.value.trim().toLowerCase() || '';
+            const filtered = students.filter(s => (!classFilter || s.classId == classFilter) && (!nameSearch || s.name.toLowerCase().includes(nameSearch)));
+            if (!filtered.length) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">暂无学生</div>'; return; }
+            container.innerHTML = filtered.map(s => {
+                const sel = selectedBatchIds.has(parseInt(s.id));
+                return `<div class="batch-student-card${sel ? ' checked' : ''}" data-id="${s.id}"><input type="checkbox" class="batch-student-cb" value="${s.id}" id="batch_${s.id}" ${sel ? 'checked' : ''}><div class="batch-student-info"><div class="batch-student-name">${escapeHtml(s.name)}</div><div class="batch-student-class">${escapeHtml(getClassNameById(s.classId))}</div></div></div>`;
+            }).join('');
+        }
+        function selectAllBatch(selectAll) {
+            document.querySelectorAll('.batch-student-cb').forEach(cb => {
+                cb.checked = selectAll;
+                cb.closest('.batch-student-card').classList.toggle('checked', selectAll);
+                const id = parseInt(cb.value);
+                if (selectAll) selectedBatchIds.add(id);
+                else selectedBatchIds.delete(id);
+            });
+            updateBatchSelectedCount();
+        }
+        function updateBatchSelectedCount() {
+            const count = document.querySelectorAll('.batch-student-cb:checked').length;
+            const badge = document.getElementById('batchSelectedCount');
+            if (!badge) return;
+            if (count > 0) {
+                badge.textContent = `已选 ${count}`;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        // 监听批量学生复选框变化
+        document.addEventListener('change', (e) => {
+            if (e.target.classList.contains('batch-student-cb')) {
+                e.target.closest('.batch-student-card').classList.toggle('checked', e.target.checked);
+                updateBatchSelectedCount();
+            }
+        });
+        async function batchGenerateSummaries() {
+            const selectedCbs = Array.from(document.querySelectorAll('.batch-student-cb:checked'));
+            if (!selectedCbs.length) { showToast('请至少选择一名学生', true); return; }
+            const monthVal = document.getElementById('monthPicker').value;
+            if (!monthVal) { showToast('请选择月份', true); return; }
+            const targetWords = parseInt(document.getElementById('monthWordSlider').value);
+            const apiConfig = { apiKey: document.getElementById('apiKey').value.trim(), modelId: document.getElementById('modelId').value.trim(), endpoint: document.getElementById('endpoint').value.trim() };
+            if (!apiConfig.apiKey || !apiConfig.modelId) { showToast('请先配置豆包API', true); return; }
+
+            const studentIds = selectedCbs.map(cb => parseInt(cb.value));
+            const studentsData = studentIds.map(id => studentMap.get(id)).filter(s => s);
+            if (!studentsData.length) return;
+
+            const batchContainer = document.getElementById('batchResultsContainer');
+            const progressSpan = document.getElementById('batchProgressMsg');
+            const batchBtn = document.getElementById('batchGenerateSummariesBtn');
+            setLoading(batchBtn, true);
+            batchContainer.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">⏳ 准备生成...</div>';
+            const bpBar = document.getElementById('batchProgressBar');
+            if (bpBar) bpBar.classList.add('show');
+
+            const concurrency = 3;
+            const results = [];
+            const queue = [...studentsData];
+            let completed = 0;
+
+            async function generateForStudent(student) {
+                try {
+                    const monthRecords = records.filter(r => r.studentId === student.id && r.recorddate && r.recorddate.startsWith(monthVal));
+                    if (!monthRecords.length) return { student, error: '本月无记录', contentSummaryHtml: '无记录', summary: '' };
+                    const classContentsList = [...new Set(monthRecords.map(r => r.classContent))];
+                    const contentSummaryHtml = classContentsList.map(c => `• ${escapeHtml(c)}`).join('<br>');
+                    const rawFeedback = monthRecords.map(r => `- ${r.reviewText}`).join('\n');
+                    const temperature = 0.7 + Math.random() * 0.3;
+                    const prompt = `请将以下课评整合成约${targetWords}字月度总结：
+- 语言亲切自然，不要出现"你"字
+- 总结孩子本月表现和进步
+- 如果同时为多名学生生成，确保每份总结不同
+
+原始课评：\n${rawFeedback}`;
+                    const res = await fetch(apiConfig.endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
+                        body: JSON.stringify({ model: apiConfig.modelId, messages: [{ role: 'user', content: prompt }], temperature, max_tokens: Math.min(500, targetWords + 80) })
+                    });
+                    if (!res.ok) throw new Error(`API ${res.status}`);
+                    const data = await res.json();
+                    let summary = data.choices?.[0]?.message?.content?.trim() || '生成失败';
+                    summary = summary.replace(/你/g, student.name);
+                    return { student, contentSummaryHtml, summary, error: null };
+                } catch (err) {
+                    return { student, error: err.message, contentSummaryHtml: '获取失败', summary: '' };
+                }
+            }
+
+            async function worker() {
+                while (queue.length) {
+                    const student = queue.shift();
+                    const result = await generateForStudent(student);
+                    results.push(result);
+                    completed++;
+                    // 只更新进度文字，不频繁操作 DOM
+                    if (progressSpan && completed % 2 === 0) progressSpan.textContent = `进度: ${completed}/${studentsData.length}`;
+                    // 更新进度条
+                    const bpPct = Math.round(completed / studentsData.length * 100);
+                    const bpFill = document.getElementById('batchProgressBarFill');
+                    if (bpFill) bpFill.style.width = bpPct + '%';
+                }
+            }
+            await Promise.all(Array(Math.min(concurrency, studentsData.length)).fill().map(() => worker()));
+            // 全部完成后一次性渲染所有卡片
+            setLoading(batchBtn, false);
+            if (progressSpan) progressSpan.textContent = `完成，共生成 ${results.length} 份`;
+            const bpFill2 = document.getElementById('batchProgressBarFill');
+            if (bpFill2) bpFill2.style.width = '100%';
+            setTimeout(() => {
+                if (bpFill2) bpFill2.style.width = '0%';
+                const bpBar2 = document.getElementById('batchProgressBar');
+                if (bpBar2) bpBar2.classList.remove('show');
+            }, 1500);
+            if (results.some(r => r.error)) showToast('部分生成失败', true);
+            else showToast('批量生成完成');
+
+            const rendered = results.map((result, i) => {
+                const card = document.createElement('div');
+                card.className = 'batch-result';
+                if (result.error) {
+                    card.innerHTML = `<div style="font-weight:600;margin-bottom:8px;">❌ ${escapeHtml(result.student.name)}</div><div style="color:var(--danger);font-size:13px;">${result.error}</div>`;
+                } else {
+                    card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><strong>📌 ${escapeHtml(result.student.name)}</strong><div class="btn-group"><button class="btn-secondary btn-sm copyBatchContentBtn" data-type="content">📋 复制内容</button><button class="btn-secondary btn-sm copyBatchSummaryBtn" data-type="summary">📋 复制总结</button></div></div><div style="margin-bottom:10px;"><strong>📚 课堂内容：</strong><div style="background:var(--bg);padding:10px;border-radius:8px;margin-top:4px;">${result.contentSummaryHtml}</div></div><div><strong>🤖 月度总结：</strong><textarea class="batch-summary-textarea" rows="3" style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:8px;">${escapeHtml(result.summary)}</textarea></div>`;
+                }
+                return card;
+            });
+            batchContainer.replaceChildren(...rendered);
+
+            // 批量结果复制按钮委托
+            batchContainer.addEventListener('click', function(e) {
+                const contentBtn = e.target.closest('.copyBatchContentBtn');
+                if (contentBtn) {
+                    e.stopPropagation();
+                    const result = results[Array.from(batchContainer.children).indexOf(contentBtn.closest('.batch-result'))];
+                    if (result && !result.error) {
+                        navigator.clipboard.writeText(result.contentSummaryHtml);
+                        showToast('已复制');
+                    }
+                    return;
+                }
+                const summaryBtn = e.target.closest('.copyBatchSummaryBtn');
+                if (summaryBtn) {
+                    e.stopPropagation();
+                    const result = results[Array.from(batchContainer.children).indexOf(summaryBtn.closest('.batch-result'))];
+                    if (result && !result.error) {
+                        navigator.clipboard.writeText(result.summary);
+                        showToast('已复制');
+                    }
+                }
+            });
+        }
+        function bindMonthlyBatchEvents() {
+            const btn = document.getElementById('batchGenerateSummariesBtn');
+            if (btn) btn.addEventListener('click', batchGenerateSummaries);
+            const selAllBtn = document.getElementById('batchSelectAllBtn');
+            if (selAllBtn) selAllBtn.addEventListener('click', () => selectAllBatch(true));
+            const clearAllBtn = document.getElementById('batchClearAllBtn');
+            if (clearAllBtn) clearAllBtn.addEventListener('click', () => selectAllBatch(false));
+            const clearResultsBtn = document.getElementById('clearBatchResultsBtn');
+            if (clearResultsBtn) clearResultsBtn.addEventListener('click', () => {
+                document.getElementById('batchResultsContainer').innerHTML = '';
+                document.getElementById('batchProgressMsg').textContent = '';
+                const bpBar = document.getElementById('batchProgressBar');
+                if (bpBar) bpBar.classList.remove('show');
+                const bpFill = document.getElementById('batchProgressBarFill');
+                if (bpFill) bpFill.style.width = '0%';
+            });
+            const refreshBtn = document.getElementById('refreshMonthlyStudentBtn');
+            if (refreshBtn) refreshBtn.addEventListener('click', refreshMonthlyStudentSelect);
+            const classFilter = document.getElementById('monthlyClassFilter');
+            if (classFilter) classFilter.addEventListener('change', refreshMonthlyStudentSelect);
+            // 月度学生搜索防抖
+            const nameSearch = document.getElementById('monthlyNameSearch');
+            if (nameSearch) nameSearch.addEventListener('input', debounce(refreshMonthlyStudentSelect, 300));
+        }
+
+        async function exportData() {
+            const exportObj = { classes, students, records };
+            const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `课评系统_${new Date().toISOString().slice(0,19)}.json`;
+            a.click();
+            showToast('导出成功');
+        }
+        async function importData(file) {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.classes) {
+                        classes = data.classes;
+                        for (let c of classes) await idbPut('classes', c);
+                    }
+                    if (data.students) {
+                        students = data.students;
+                        for (let s of students) await idbPut('students', s);
+                    }
+                    if (data.records) {
+                        records = data.records;
+                        for (let r of records) await idbPut('records', r);
+                    }
+                    _cacheTs.classes = _cacheTs.students = _cacheTs.records = Date.now();
+                    refreshClassMap();
+                    await refreshAllData();
+                    showToast('导入成功');
+                } catch (err) {
+                    showToast('文件错误', true);
+                }
+            };
+            reader.readAsText(file);
+        }
+        async function clearAllData() {
+            if (confirm('清空所有数据不可恢复！')) {
+                // 本地立即清空
+                classes = [];
+                students = [];
+                records = [];
+                _cacheTs.classes = _cacheTs.students = _cacheTs.records = 0;
+                await idbClear('classes');
+                await idbClear('students');
+                await idbClear('records');
+                await idbClear('pending');
+                refreshClassMap();
+                renderAllByTab();
+                showToast('已清空');
+            }
+        }
+
+        async function initMainSystem() {
+            initApi();
+            connectRealtime(); // 连接实时同步中枢（WebSocket），近实时跨设备刷新
+            // 打开 IndexedDB 并从本地缓存加载数据
+            try { idbDB = await openIDB(); } catch(e) { console.warn('IndexedDB 不可用:', e); }
+            // 优先从 IndexedDB 恢复数据
+            if (idbDB) {
+                classes = await idbGetAll('classes');
+                students = await idbGetAll('students');
+                records = await idbGetAll('records');
+                _cacheTs.classes = _cacheTs.students = _cacheTs.records = Date.now();
+                refreshClassMap();
+                refreshStudentMap();
+                refreshRecordMap();
+                renderAllByTab();
+            }
+            // 后台拉取云端最新数据（先推本地 pending，再强制下拉，解决多设备同步）
+            if (apiReady) {
+                syncNow().catch(e => console.warn('云端同步失败，使用本地数据', e));
+            }
+            // 检查待同步数据
+            const pendingCount = (await idbGetPending()).length;
+            if (pendingCount > 0) flushPendingToSupabase().catch(console.error);
+            if (_bindingsBound) return; // 避免重复绑定事件
+            _bindingsBound = true;
+            // 一次性绑定事件委托，不用每次渲染时重复绑定
+            bindClassListEvents();
+            // 学生表格事件委托（tbody 已存在时绑定一次即可）
+            const studentTbody = document.getElementById('studentTbody');
+            if (studentTbody) {
+                studentTbody.addEventListener('click', function(e) {
+                    const btn = e.target.closest('.editStudentBtn, .delStudentBtn');
+                    if (!btn) return;
+                    if (btn.classList.contains('editStudentBtn')) {
+                        editStudentById(parseInt(btn.dataset.id));
+                    } else {
+                        if (confirm('删除学生将同时删除其所有记录')) deleteStudentById(parseInt(btn.dataset.id));
+                    }
+                });
+            }
+            // 记录表格事件委托
+            const recordTbody = document.getElementById('recordTbody');
+            if (recordTbody) {
+                recordTbody.addEventListener('click', function(e) {
+                    const btn = e.target.closest('.saveRecordBtn, .delRecordBtn');
+                    if (btn) {
+                        e.stopPropagation();
+                        if (btn.classList.contains('saveRecordBtn')) {
+                            const rid = parseInt(btn.dataset.id);
+                            const rec = recordMap.get(rid);
+                            if (!rec) return;
+                            rec.classContent = document.querySelector(`.editable-field[data-id="${rid}"][data-field="classContent"]`).innerText.trim();
+                            rec.reviewText = document.querySelector(`.editable-field[data-id="${rid}"][data-field="reviewText"]`).innerText.trim();
+                            rec.recorddate = document.querySelector(`.rec-date-edit[data-id="${rid}"]`).value.replace('T', ' ');
+                            saveRecordToDB(rec).catch(console.error);
+                        } else {
+                            if (confirm('删除该记录？')) deleteRecordById(parseInt(btn.dataset.id));
+                        }
+                    } else {
+                        const field = e.target.closest('.editable-field');
+                        if (!field) return;
+                        const rid = parseInt(field.dataset.id);
+                        const fname = field.dataset.field;
+                        const rec = recordMap.get(rid);
+                        if (rec) {
+                            const newVal = prompt(fname === 'classContent' ? '修改课堂内容' : '修改课评', rec[fname]);
+                            if (newVal && newVal.trim()) { rec[fname] = newVal.trim(); saveRecordToDB(rec).catch(console.error); }
+                        }
+                    }
+                });
+                recordTbody.addEventListener('change', function(e) {
+                    if (e.target.classList.contains('rec-date-edit')) {
+                        const rid = parseInt(e.target.dataset.id);
+                        const rec = recordMap.get(rid);
+                        if (rec) { rec.recorddate = e.target.value.replace('T', ' '); saveRecordToDB(rec).catch(console.error); }
+                    }
+                });
+            }
+
+            // Tab切换
+            document.querySelectorAll('.nav-tab').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tabId = btn.dataset.tab;
+                    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById(`tab-${tabId}`).classList.add('active');
+                    currentTab = tabId;
+                    renderAllByTab();
+                });
+            });
+
+            // 退出登录
+            document.getElementById('logoutBtn').addEventListener('click', () => {
+                localStorage.removeItem('eggy_admin_logged');
+                location.reload();
+            });
+            // 手动同步按钮
+            const syncBtn = document.getElementById('syncNowBtn');
+            if (syncBtn) {
+                syncBtn.addEventListener('click', () => {
+                    syncBtn.disabled = true;
+                    syncBtn.textContent = '同步中...';
+                    syncNow().finally(() => {
+                        syncBtn.disabled = false;
+                        syncBtn.textContent = '☁️ 同步';
+                    });
+                });
+            }
+
+            // 学生管理
+            document.getElementById('addStudentBtn').addEventListener('click', handleAddOrUpdateStudent);
+            document.getElementById('clearStudentForm').addEventListener('click', () => {
+                document.getElementById('stuName').value = '';
+                const addBtn = document.getElementById('addStudentBtn');
+                delete addBtn.dataset.editId;
+                addBtn.innerText = '➕ 添加学生';
+            });
+            document.getElementById('refreshStudentListBtn').addEventListener('click', refreshStudentTable);
+            document.getElementById('batchDeleteStudentBtn').addEventListener('click', batchDeleteStudents);
+            document.getElementById('filterClassSelect').addEventListener('change', refreshStudentTable);
+            // 搜索防抖
+            document.getElementById('searchNameInput').addEventListener('input', debounce(refreshStudentTable, 300));
+
+            // 显示/隐藏 API Key
+            document.getElementById('toggleApiShow').addEventListener('click', () => {
+                const input = document.getElementById('apiKey');
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    document.getElementById('toggleApiShow').textContent = '🙈';
+                } else {
+                    input.type = 'password';
+                    document.getElementById('toggleApiShow').textContent = '👁️';
+                }
+            });
+
+            // API配置
+            document.getElementById('saveApiBtn').addEventListener('click', () => {
+                const cfg = { apiKey: document.getElementById('apiKey').value.trim(), modelId: document.getElementById('modelId').value.trim(), endpoint: document.getElementById('endpoint').value.trim() };
+                if (cfg.apiKey && cfg.modelId) {
+                    localStorage.setItem('doubao_api_config_local', JSON.stringify(cfg));
+                    showToast('API配置已保存');
+                } else {
+                    showToast('请填写完整', true);
+                }
+            });
+            document.getElementById('testApiBtn').addEventListener('click', async () => {
+                const cfg = { apiKey: document.getElementById('apiKey').value.trim(), modelId: document.getElementById('modelId').value.trim(), endpoint: document.getElementById('endpoint').value.trim() };
+                if (!cfg.apiKey || !cfg.modelId) { showToast('请填写完整', true); return; }
+                try {
+                    const res = await fetch(cfg.endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.apiKey}` },
+                        body: JSON.stringify({ model: cfg.modelId, messages: [{ role: 'user', content: 'ok' }], max_tokens: 5 })
+                    });
+                    document.getElementById('apiTestStatus').textContent = res.ok ? '✅ 连接成功' : '❌ 鉴权失败';
+                    document.getElementById('apiTestStatus').style.color = res.ok ? 'var(--success)' : 'var(--danger)';
+                    showToast(res.ok ? '✅ 连接成功' : '❌ 鉴权失败', !res.ok);
+                } catch (e) {
+                    document.getElementById('apiTestStatus').textContent = '❌ 网络错误';
+                    document.getElementById('apiTestStatus').style.color = 'var(--danger)';
+                    showToast('网络错误', true);
+                }
+            });
+
+            // 生成课评
+            document.getElementById('generatePreviewBtn').addEventListener('click', generatePreviews);
+            document.getElementById('classFilterSelectGen').addEventListener('change', refreshStudentSelectors);
+            document.getElementById('nameFilterSelectGen').addEventListener('input', refreshStudentSelectors);
+            document.getElementById('refreshStudentListGenBtn').addEventListener('click', refreshStudentSelectors);
+            // 勾选状态同步到 selectedStudentIds（容器级委托，只绑一次）
+            const checklistEl = document.getElementById('studentChecklist');
+            if (checklistEl && !checklistEl.dataset.bound) {
+                checklistEl.addEventListener('change', function(e) {
+                    if (e.target.classList.contains('stuCheckItem')) {
+                        const id = parseInt(e.target.value);
+                        if (e.target.checked) selectedStudentIds.add(id);
+                        else selectedStudentIds.delete(id);
+                    }
+                });
+                checklistEl.dataset.bound = '1';
+            }
+            document.getElementById('toggleIndividualBtn').addEventListener('click', () => {
+                const area = document.getElementById('individualPerfArea');
+                area.style.display = area.style.display === 'none' ? 'block' : 'none';
+            });
+            document.getElementById('wordSlider').addEventListener('input', (e) => {
+                document.getElementById('wordCountValue').textContent = e.target.value;
+            });
+
+            // 记录管理
+            document.getElementById('searchRecordsBtn').addEventListener('click', refreshRecordList);
+            document.getElementById('resetRecordsBtn').addEventListener('click', () => {
+                document.getElementById('recordClassFilter').value = '';
+                document.getElementById('recordNameSearch').value = '';
+                document.getElementById('recordDateFrom').value = '';
+                document.getElementById('recordDateTo').value = '';
+                refreshRecordList();
+            });
+            document.getElementById('batchDeleteBtn').addEventListener('click', batchDeleteRecords);
+            document.getElementById('selectAllRecordsBtn').addEventListener('click', () => {
+                const cb = document.getElementById('recordSelectAllCheckbox');
+                cb.checked = !cb.checked;
+                selectAllRecords();
+            });
+            document.getElementById('recordSelectAllCheckbox').addEventListener('change', selectAllRecords);
+            document.getElementById('recordClassFilter').addEventListener('change', refreshRecordList);
+            // 搜索防抖
+            document.getElementById('recordNameSearch').addEventListener('input', debounce(refreshRecordList, 300));
+            document.getElementById('recordDateFrom').addEventListener('change', refreshRecordList);
+            document.getElementById('recordDateTo').addEventListener('change', refreshRecordList);
+            document.getElementById('batchEditSelectedBtn').addEventListener('click', batchEditSelected);
+            document.getElementById('confirmBatchEditBtn').addEventListener('click', confirmBatchEdit);
+            document.getElementById('closeBatchEditBtn').addEventListener('click', () => document.getElementById('batchEditModal').classList.remove('show'));
+            document.getElementById('batchDeleteFilteredBtn').addEventListener('click', batchDeleteFiltered);
+
+            // 新增记录模态框
+            document.getElementById('addRecordBtn').addEventListener('click', () => {
+                const modalSel = document.getElementById('modalStudentSelect');
+                if (modalSel && students.length) {
+                    modalSel.innerHTML = '<option value="">请选择学生</option>' + students.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}" data-class="${s.classId}">${escapeHtml(s.name)} (${getClassNameById(s.classId)})</option>`).join('');
+                }
+                document.getElementById('modalClassTopic').value = '';
+                document.getElementById('modalClassContent').value = '';
+                document.getElementById('modalReviewText').value = '';
+                document.getElementById('modalRecordDate').value = nowLocalInput();
+                document.getElementById('addRecordModal').classList.add('show');
+            });
+            document.getElementById('closeModalBtn').addEventListener('click', () => document.getElementById('addRecordModal').classList.remove('show'));
+            document.getElementById('confirmAddRecordBtn').addEventListener('click', async () => {
+                const studentId = document.getElementById('modalStudentSelect').value;
+                if (!studentId) { showToast('请选择学生', true); return; }
+                const student = studentMap.get(parseInt(studentId));
+                const classTopic = document.getElementById('modalClassTopic').value.trim();
+                const classContent = document.getElementById('modalClassContent').value.trim();
+                const reviewText = document.getElementById('modalReviewText').value.trim();
+                let recordDate = document.getElementById('modalRecordDate').value;
+                if (!classContent) { showToast('请填写课堂内容', true); return; }
+                if (!reviewText) { showToast('请填写课评', true); return; }
+                if (!recordDate) recordDate = nowLocalFull();
+                else recordDate = recordDate.replace('T', ' ') + ':00';
+                // 主题优先用输入框；若未填则尝试从课堂内容里《》提取
+                const finalTopic = classTopic || parseClassContent(classContent).classTopic;
+                const finalContent = parseClassContent(classContent).classContent;
+                await addManualRecord(student.id, student.name, student.classId, finalContent, reviewText, recordDate, finalTopic);
+                document.getElementById('addRecordModal').classList.remove('show');
+            });
+
+            // 月度整合
+            document.getElementById('viewRecordsBtn').addEventListener('click', viewMonthRecords);
+            document.getElementById('generateSummaryBtn').addEventListener('click', generateMonthlySummary);
+            document.getElementById('copyContentSummaryBtn').addEventListener('click', () => {
+                const text = document.getElementById('classContentSummary').innerText;
+                if (text && text !== '-') { navigator.clipboard.writeText(text); showToast('已复制'); }
+            });
+            document.getElementById('copyMonthlySummaryBtn').addEventListener('click', () => {
+                const text = document.getElementById('monthlySummaryEditable').value;
+                if (text) { navigator.clipboard.writeText(text); showToast('已复制'); }
+            });
+            document.getElementById('monthWordSlider').addEventListener('input', (e) => {
+                document.getElementById('monthWordValue').textContent = e.target.value;
+                document.getElementById('targetWordDisplay').textContent = e.target.value;
+            });
+            const monthPicker = document.getElementById('monthPicker');
+            if (monthPicker && !monthPicker.value) monthPicker.value = new Date().toISOString().slice(0, 7);
+
+            // 数据备份
+            document.getElementById('addClassBtn').addEventListener('click', async () => {
+                const newName = prompt('班级名称');
+                if (newName) await addOrUpdateClass(null, newName.trim());
+            });
+            document.getElementById('exportDataBtn').addEventListener('click', exportData);
+            document.getElementById('importDataBtn').addEventListener('click', () => {
+                const inp = document.createElement('input');
+                inp.type = 'file';
+                inp.accept = '.json';
+                inp.onchange = e => { if (e.target.files[0]) importData(e.target.files[0]); };
+                inp.click();
+            });
+            document.getElementById('clearAllDataBtn').addEventListener('click', clearAllData);
+
+            // 加载配置
+            const savedApi = localStorage.getItem('doubao_api_config_local');
+            if (savedApi) {
+                const cfg = JSON.parse(savedApi);
+                document.getElementById('apiKey').value = cfg.apiKey || '';
+                document.getElementById('modelId').value = cfg.modelId || '';
+                document.getElementById('endpoint').value = cfg.endpoint || '';
+            }
+
+            refreshClassSelects();
+            renderAllByTab();
+            bindMonthlyBatchEvents();
+            renderBatchStudentList();
+        }
+
+        // 登录逻辑
+        const loginOverlay = document.getElementById('loginOverlay');
+        const mainContent = document.getElementById('mainContent');
+
+        function checkLoginStatus() {
+            const logged = localStorage.getItem('eggy_admin_logged') === 'true';
+            if (logged) {
+                loginOverlay.classList.add('hidden');
+                mainContent.classList.add('visible');
+                initMainSystem();
+            } else {
+                loginOverlay.classList.remove('hidden');
+                mainContent.classList.remove('visible');
+            }
+        }
+        function doLogin() {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value.trim();
+            if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+                localStorage.setItem('eggy_admin_logged', 'true');
+                document.getElementById('loginError').textContent = '';
+                checkLoginStatus();
+            } else {
+                document.getElementById('loginError').textContent = '用户名或密码错误';
+            }
+        }
+        document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
+        document.getElementById('loginPassword').addEventListener('keypress', (e) => { if (e.key === 'Enter') doLogin(); });
+        document.getElementById('loginUsername').addEventListener('keypress', (e) => { if (e.key === 'Enter') doLogin(); });
+
+        // 全局键盘快捷键（登录后可用）
+        document.addEventListener('keydown', (e) => {
+            // 避免在输入框中触发快捷键
+            const tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            // Ctrl+S - 保存当前记录/触发同步
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                const pendingCount = (document.getElementById('syncBadgeNum')?.textContent) || 0;
+                if (parseInt(pendingCount) > 0) flushPendingToSupabase().catch(console.error);
+                else showToast('数据已保存在本地');
+            }
+            // Ctrl+G - 生成课评预览
+            if (e.ctrlKey && e.key === 'g') {
+                e.preventDefault();
+                if (currentTab === 'preview') generatePreviews();
+                else showToast('请先切换到"生成课评"标签', true);
+            }
+            // Ctrl+B - 批量生成月度总结
+            if (e.ctrlKey && e.key === 'b') {
+                e.preventDefault();
+                if (currentTab === 'monthly') batchGenerateSummaries();
+                else showToast('请先切换到"月度总结"标签', true);
+            }
+            // Ctrl+R - 刷新数据
+            if (e.ctrlKey && e.key === 'r') {
+                e.preventDefault();
+                _cacheTs.classes = _cacheTs.students = _cacheTs.records = 0;
+                refreshAllData().then(() => showToast('数据已刷新'));
+            }
+        });
+
+        checkLoginStatus();
+    })();
+</script>
+</body>
+</html>
