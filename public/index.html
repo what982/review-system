@@ -522,38 +522,65 @@
             /* 卡片头部在更窄屏幕允许换行，避免标题被挤压 */
             .card-header { flex-wrap: wrap; }
 
-            /* 课堂记录表格→卡片化 */
+            /* 课堂记录表格→卡片化（手机端优化） */
             .record-table-card thead { display: none; }
             .record-table-card tbody tr {
                 display: flex;
                 flex-direction: column;
-                gap: 6px;
-                padding: 12px;
-                margin-bottom: 8px;
+                gap: 8px;
+                padding: 14px;
+                margin-bottom: 10px;
                 border: 1px solid var(--border);
-                border-radius: 10px;
+                border-radius: 12px;
                 background: white;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.04);
             }
             .record-table-card td {
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
-                padding: 4px 0;
-                border-bottom: 1px solid var(--border);
-                font-size: 12px;
+                align-items: flex-start;
+                gap: 10px;
+                padding: 6px 0;
+                border-bottom: 1px dashed var(--border);
+                font-size: 13px;
             }
             .record-table-card td::before {
                 content: attr(data-label);
                 font-weight: 600;
                 color: var(--text-muted);
                 font-size: 11px;
-                text-transform: uppercase;
                 flex-shrink: 0;
+                align-self: flex-start;
+                padding-top: 2px;
             }
             .record-table-card td:last-child { border-bottom: none; }
-            .record-table-card td .editable-field { text-align: right; max-width: 65%; word-break: break-all; }
-            .record-table-card td.btn-group { justify-content: flex-end; }
-            .record-table-card td.btn-group button { font-size: 11px; padding: 5px 8px; }
+            /* 可编辑字段：整块可点、浅底区分，点击弹出编辑 */
+            .record-table-card td .editable-field {
+                flex: 1;
+                text-align: right;
+                word-break: break-word;
+                line-height: 1.5;
+                background: var(--bg);
+                border: 1px solid transparent;
+                border-radius: 8px;
+                padding: 8px 10px;
+                cursor: pointer;
+                min-width: 0;
+            }
+            .record-table-card td .editable-field:active { border-color: var(--primary); }
+            /* 操作按钮组：全宽、两列等宽，方便手机点击 */
+            .record-table-card td.btn-group {
+                justify-content: stretch;
+                gap: 8px;
+                border-bottom: none;
+                padding-top: 10px;
+            }
+            .record-table-card td.btn-group button {
+                flex: 1;
+                font-size: 13px;
+                padding: 10px 6px;
+                border-radius: 8px;
+            }
 
             /* 批量学生卡片更紧凑 */
             .batch-student-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
@@ -631,7 +658,6 @@
             .record-table-card tbody tr { padding: 14px; margin-bottom: 10px; }
             .record-table-card td { font-size: 13px; padding: 6px 0; }
             .record-table-card td::before { font-size: 11px; }
-            .record-table-card td .editable-field { max-width: 70%; }
             .record-table-card td.btn-group { justify-content: stretch; gap: 8px; }
             .record-table-card td.btn-group button { flex: 1; font-size: 13px; padding: 9px 6px; }
 
@@ -815,13 +841,13 @@
         </div>
         
         <div class="nav-tabs">
-            <button class="nav-tab active" data-tab="config">⚙️ 班级管理</button>
-            <button class="nav-tab" data-tab="record">📝 课堂记录</button>
+            <button class="nav-tab active" data-tab="record">📝 课堂记录</button>
+            <button class="nav-tab" data-tab="config">⚙️ 班级管理</button>
             <button class="nav-tab" data-tab="monthly">📅 月度整合</button>
         </div>
         
         <!-- 配置页 -->
-        <div id="tab-config" class="tab-content active">
+        <div id="tab-config" class="tab-content">
             <div class="card">
                 <div class="card-header">
                     <h3>🤖 豆包API 配置</h3>
@@ -898,7 +924,7 @@
         </div>
         
         <!-- 记录页 -->
-        <div id="tab-record" class="tab-content">
+        <div id="tab-record" class="tab-content active">
             <div class="card">
                 <div class="card-header"><h3>✨ 生成课评</h3></div>
                 <div class="card-body">
@@ -1102,7 +1128,7 @@
         let apiReady = false;
         let classes = [], students = [], records = [];
         let individualPerfMap = {};
-        let currentTab = "config";
+        let currentTab = "record";
         let _bindingsBound = false;
 
         // ─── IndexedDB 本地缓存层 ────────────────────────────────
@@ -2106,7 +2132,17 @@
             showToast(`✅ 生成完成，共 ${orderedResults.length} 份课评`);
         }
 
+        let _pendingRecordRefresh = false;
+        // 判断用户当前是否正在输入（焦点在输入框/文本域/可编辑元素）
+        function isUserTyping() {
+            const a = document.activeElement;
+            if (!a) return false;
+            return a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable;
+        }
         async function refreshRecordList() {
+            // 保护：用户正在输入时不重建列表，避免后台自动同步打断编辑/丢失焦点。
+            // 内存中的 records 已是最新（同步时已拉取），待用户停手后由 focusout 补刷。
+            if (isUserTyping()) { _pendingRecordRefresh = true; return; }
             const classFilterVal = document.getElementById('recordClassFilter').value;
             const nameFilterVal = document.getElementById('recordNameSearch').value.trim().toLowerCase();
             const dateFrom = document.getElementById('recordDateFrom').value;
@@ -2135,7 +2171,7 @@
                 const dateValue = rec.recorddate ? rec.recorddate.replace(' ', 'T') : '';
                 const tr = document.createElement('tr');
                 tr.classList.add('record-table-card');
-                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent">${escapeHtml(rec.classContent)}</td><td class="editable-field" data-id="${rec.id}" data-field="reviewText">${escapeHtml(rec.reviewText.substring(0, 60))}${rec.reviewText.length>60?'…':''}</td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
+                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent">${escapeHtml(rec.classContent)}</td><td class="editable-field" data-id="${rec.id}" data-field="reviewText">${escapeHtml(rec.reviewText)}</td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
                 tbody.appendChild(tr);
             });
         }
@@ -2557,8 +2593,7 @@
                             const rid = parseInt(btn.dataset.id);
                             const rec = recordMap.get(rid);
                             if (!rec) return;
-                            rec.classContent = document.querySelector(`.editable-field[data-id="${rid}"][data-field="classContent"]`).innerText.trim();
-                            rec.reviewText = document.querySelector(`.editable-field[data-id="${rid}"][data-field="reviewText"]`).innerText.trim();
+                            // classContent/reviewText 直接用内存最新值（prompt 编辑已写回 rec），避免读取被截断的显示层
                             rec.recorddate = document.querySelector(`.rec-date-edit[data-id="${rid}"]`).value.replace('T', ' ');
                             saveRecordToDB(rec).catch(console.error);
                         } else {
@@ -2596,6 +2631,15 @@
                     currentTab = tabId;
                     renderAllByTab();
                 });
+            });
+
+            // 输入框保护：用户停手（失焦）后，若后台同步期间被跳过刷新，则立即补刷记录列表。
+            // 效果：自动同步照常把最新数据拉进内存，但编辑中的输入框不会被重建打断；停手即见最新。
+            document.addEventListener('focusout', () => {
+                if (_pendingRecordRefresh && !isUserTyping()) {
+                    _pendingRecordRefresh = false;
+                    setTimeout(() => { if (currentTab === 'record') refreshRecordList(); }, 400);
+                }
             });
 
             // 退出登录
