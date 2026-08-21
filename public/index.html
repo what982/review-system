@@ -1299,7 +1299,7 @@
         // 即使本次仍未送达，pending 已持久化在 IndexedDB，下次打开会自动补推，不会丢数据。
         function sendUnload(url, method, body) {
             try {
-                fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+                fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body, keepalive: true, credentials: 'include' }).catch(() => {});
             } catch (e) {
                 // 极老浏览器回退到 sendBeacon（仅支持 POST）
                 if (method === 'POST' && navigator.sendBeacon) {
