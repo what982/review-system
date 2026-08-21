@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 显式拉取 main 分支（非 detached HEAD），wrangler 才能识别为生产分支并部署到 production 环境
+          ref: main
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,9 +36,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # 2) 再部署 Pages（前端 public/ + Pages Functions api/）
+      # 2) 再部署 Pages 到 production 环境（生产分支已设为 main，且 checkout ref:main 保证识别正确）
       - name: Deploy Pages
-        run: wrangler pages deploy public --project-name review-system
+        run: wrangler pages deploy public --project-name review-system --branch main
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
