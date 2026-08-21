@@ -1088,15 +1088,14 @@
 
 <script>
     (function() {
-        const ADMIN_USERNAME = "what";
-        const ADMIN_PASSWORD = "what123";
         // ─── 云端 API（Cloudflare Pages Functions + D1，替代 Supabase）─────────────
         // 前端不再直连任何第三方数据库，统一走同源 fetch('/api/...')；
         // 多设备天然共享同一份 D1 数据，且不受 file:// null 源 / CORS 限制影响。
+        // 所有请求带 credentials: 'include'，确保会话 Cookie 一并发送（登录鉴权依赖它）。
         const API_BASE = '/api';
         const api = {
             async list(table) {
-                const res = await fetch(`${API_BASE}/${table}`, { headers: { 'Accept': 'application/json' } });
+                const res = await fetch(`${API_BASE}/${table}`, { headers: { 'Accept': 'application/json' }, credentials: 'include' });
                 if (!res.ok) throw new Error(`加载${table}失败: HTTP ${res.status}`);
                 const json = await res.json();
                 return json.data || [];
@@ -1106,6 +1105,7 @@
                 const res = await fetch(`${API_BASE}/${table}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({ items: rows })
                 });
                 if (!res.ok) { const t = await res.text(); throw new Error(`保存${table}失败: ${t}`); }
@@ -1115,13 +1115,14 @@
                 const res = await fetch(`${API_BASE}/${table}`, {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({ id })
                 });
                 if (!res.ok) throw new Error(`删除${table}失败: HTTP ${res.status}`);
                 return await res.json();
             },
             async ping() {
-                try { const res = await fetch(`${API_BASE}/ping`, { method: 'GET' }); return res.ok; }
+                try { const res = await fetch(`${API_BASE}/ping`, { method: 'GET', credentials: 'include' }); return res.ok; }
                 catch (e) { return false; }
             }
         };
@@ -2642,9 +2643,11 @@
                 }
             });
 
-            // 退出登录
-            document.getElementById('logoutBtn').addEventListener('click', () => {
-                localStorage.removeItem('eggy_admin_logged');
+            // 退出登录（调用后端销毁会话，仅手动退出才失效）
+            document.getElementById('logoutBtn').addEventListener('click', async () => {
+                try {
+                    await fetch(`${API_BASE}/logout`, { method: 'POST', credentials: 'include' });
+                } catch (e) { /* 忽略网络异常，仍刷新页面 */ }
                 location.reload();
             });
             // 手动同步按钮
@@ -2846,30 +2849,57 @@
             renderBatchStudentList();
         }
 
-        // 登录逻辑
+        // 登录逻辑（真实鉴权：密码哈希存 D1，登录发 HttpOnly Cookie 长会话）
         const loginOverlay = document.getElementById('loginOverlay');
         const mainContent = document.getElementById('mainContent');
+        const loginError = document.getElementById('loginError');
 
-        function checkLoginStatus() {
-            const logged = localStorage.getItem('eggy_admin_logged') === 'true';
-            if (logged) {
-                loginOverlay.classList.add('hidden');
-                mainContent.classList.add('visible');
-                initMainSystem();
-            } else {
+        // 页面加载时向后端查询登录态；未登录只显示登录框，不加载任何数据
+        async function checkLoginStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/me`, { method: 'GET', credentials: 'include' });
+                const data = await res.json().catch(() => ({ loggedIn: false }));
+                if (data.loggedIn) {
+                    loginOverlay.classList.add('hidden');
+                    mainContent.classList.add('visible');
+                    initMainSystem();
+                } else {
+                    loginOverlay.classList.remove('hidden');
+                    mainContent.classList.remove('visible');
+                }
+            } catch (e) {
+                // 请求失败（如网络异常）默认展示登录页，不暴露系统
                 loginOverlay.classList.remove('hidden');
                 mainContent.classList.remove('visible');
             }
         }
-        function doLogin() {
+        async function doLogin() {
             const username = document.getElementById('loginUsername').value.trim();
-            const password = document.getElementById('loginPassword').value.trim();
-            if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-                localStorage.setItem('eggy_admin_logged', 'true');
-                document.getElementById('loginError').textContent = '';
-                checkLoginStatus();
-            } else {
-                document.getElementById('loginError').textContent = '用户名或密码错误';
+            const password = document.getElementById('loginPassword').value;
+            loginError.textContent = '';
+            if (!username || !password) { loginError.textContent = '请输入用户名和密码'; return; }
+            try {
+                const res = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password })
+                });
+                if (res.ok) {
+                    document.getElementById('loginPassword').value = '';
+                    loginOverlay.classList.add('hidden');
+                    mainContent.classList.add('visible');
+                    initMainSystem();
+                } else {
+                    let msg = '用户名或密码错误';
+                    if (res.status === 429) {
+                        const t = await res.text().catch(() => '');
+                        msg = t || '尝试次数过多，请稍后再试';
+                    }
+                    loginError.textContent = msg;
+                }
+            } catch (e) {
+                loginError.textContent = '登录请求失败，请检查网络';
             }
         }
         document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
