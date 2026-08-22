@@ -57,3 +57,11 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     fails       INTEGER DEFAULT 0,
     locked_until INTEGER DEFAULT 0
 );
+
+-- ─── 全局版本号表（边缘缓存失效用）────────────────────────
+-- global_version 任一表写入后 +1，缓存键随版本变化自动失效，实现列表读取边缘加速且数据新鲜。
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    val INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO meta (key, val) VALUES ('global_version', 1);

@@ -223,6 +223,22 @@ async function broadcastChange(env) {
   }
 }
 
+// ── 全局版本号（边缘缓存失效用）──
+// meta.global_version 任一表写入后 +1，GET 缓存键随版本变化自动失效，列表读取边缘加速且数据新鲜。
+async function getCanonicalVersion(db) {
+  try {
+    const r = await db.prepare("SELECT val FROM meta WHERE key='global_version'").first();
+    return (r && typeof r.val === 'number') ? r.val : 1;
+  } catch (e) {
+    return 1; // meta 表尚未建立时退化为 1，读取仍可工作（只是不缓存）
+  }
+}
+async function bumpGlobalVersion(db) {
+  try {
+    await db.prepare("UPDATE meta SET val = val + 1 WHERE key='global_version'").run();
+  } catch (e) { /* 版本表缺失不影响主流程 */ }
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const method = request.method.toUpperCase();
@@ -262,9 +278,23 @@ export async function onRequest(context) {
     if (method === 'GET') {
       let sql = 'SELECT * FROM ' + tname;
       sql += (path === 'records') ? ' ORDER BY recorddate DESC' : ' ORDER BY id ASC';
+      // 边缘缓存：缓存键随全局版本号变化失效，TTL 10s 兜底
+      const ver = await getCanonicalVersion(db);
+      const cacheUrl = 'https://edge-cache.local/' + path + ':v' + ver + ':u' + user.id;
+      const cached = await caches.default.match(cacheUrl);
+      if (cached) {
+        const h = new Headers(cached.headers);
+        h.set('X-Cache', 'HIT');
+        return new Response(cached.body, { status: cached.status, headers: h });
+      }
       const res = await db.prepare(sql).all();
       const rows = (res && res.results !== undefined) ? res.results : (res || []);
-      return json({ data: rows });
+      const headers = new Headers(H);
+      headers.set('Cache-Control', 'max-age=10');
+      headers.set('X-Cache', 'MISS');
+      const resp = new Response(JSON.stringify({ data: rows }), { status: 200, headers });
+      await caches.default.put(cacheUrl, resp.clone());
+      return resp;
     }
 
     // ── 写入（upsert，按 id 幂等）──
@@ -287,6 +317,7 @@ export async function onRequest(context) {
         await db.prepare(sql).bind(...clean).run();
       }
       await broadcastChange(env);
+      await bumpGlobalVersion(db);
       return json({ ok: true, count: items.length });
     }
 
@@ -300,6 +331,7 @@ export async function onRequest(context) {
         await db.prepare('DELETE FROM ' + tname + ' WHERE id=?').bind(toInt(id)).run();
       }
       await broadcastChange(env);
+      await bumpGlobalVersion(db);
       return json({ ok: true, count: ids.length });
     }
 
