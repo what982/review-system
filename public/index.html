@@ -1328,6 +1328,8 @@
         }
         window.addEventListener('pagehide', flushOnExit);
         window.addEventListener('beforeunload', flushOnExit);
+        // 兜底轮询：每 15 秒拉取一次（实时 WebSocket 为主，轮询为容错）
+        setInterval(() => { if (!document.hidden) syncNow().catch(console.error); }, 15000);
 
         // ─── 实时推送（Cloudflare Durable Object WebSocket 中枢）───
         // 任一设备写入后，服务端会向所有在线设备广播 "changed"，本机收到后立即拉取最新数据，
@@ -1378,11 +1380,15 @@
                     }, 60000);
                 };
                 ws.onmessage = (ev) => {
-                    // 收到任何消息都视为链路存活，重置看门狗；数据变更信号本机静默（不自动刷新/不提示）
+                    // 收到任何消息都视为链路存活，重置看门狗
                     if (wsLivenessTimer) {
                         clearTimeout(wsLivenessTimer);
                         wsLivenessTimer = setTimeout(() => { try { ws.close(); } catch (e) {} }, 60000);
                     }
+                    try {
+                        const msg = JSON.parse(ev.data);
+                        if (msg && msg.type === 'changed') scheduleRealtimeSync();
+                    } catch (e) { /* 忽略非 JSON */ }
                 };
                 ws.onclose = () => { updateRealtimeDot(false); wsRealtime = null; stopWsTimers(); scheduleReconnect(); };
                 ws.onerror = () => { try { ws.close(); } catch (e) {} };
@@ -1765,16 +1771,8 @@
         }
 
         async function saveRecordToDB(record) {
-            // 去重：同一学生 + 同一天 + 同一课堂内容 = 同一节课。
-            // 若已存在则复用其 id（覆盖更新），避免预览多次生成/保存产生重复记录。
-            const day = String(record.recordDate || record.recorddate || '').slice(0, 10);
-            const dup = (record.studentId != null && day)
-                ? records.find(r => Number(r.studentId) === Number(record.studentId)
-                    && String(r.recorddate || '').slice(0, 10) === day
-                    && String(r.classContent || '') === String(record.classContent || ''))
-                : null;
             const recordForDb = {
-                id: Math.floor(Number(dup ? dup.id : record.id)),
+                id: Math.floor(Number(record.id)),
                 studentId: Number(record.studentId),
                 studentName: String(record.studentName),
                 classId: Number(record.classId),
@@ -1923,8 +1921,6 @@
         }
 
         function refreshStudentSelectors() {
-            // 保护：用户正在输入时不重建学生选择器/逐生表现输入框，避免打断编辑
-            if (isUserTyping()) { _pendingStudentRefresh = true; return; }
             const classFilter = document.getElementById('classFilterSelectGen').value;
             const nameFilter = document.getElementById('nameFilterSelectGen').value.trim().toLowerCase();
             let filtered = students.filter(s => (!classFilter || s.classId == classFilter) && (!nameFilter || s.name.toLowerCase().includes(nameFilter)));
@@ -1946,12 +1942,6 @@
         // 事件委托：特殊表现输入框（绑定一次即可）
         const perfArea = document.getElementById('individualPerfArea');
         if (perfArea) {
-            // 逐键保存，确保即使极偶尔重建也不丢字
-            perfArea.addEventListener('input', function(e) {
-                if (e.target.classList.contains('ind-perf-input')) {
-                    individualPerfMap[parseInt(e.target.dataset.id)] = e.target.value;
-                }
-            });
             perfArea.addEventListener('change', function(e) {
                 if (e.target.classList.contains('ind-perf-input')) {
                     individualPerfMap[parseInt(e.target.dataset.id)] = e.target.value.trim();
@@ -2104,8 +2094,7 @@
             }).join('');
 
             // 事件委托：生成的卡片按钮（用容器的点击事件统一处理，避免逐个绑定）
-            // 用 onclick 赋值而非 addEventListener：每次生成只保留最新监听器，避免多次生成时监听器叠加导致跨批次数据错乱
-            container.onclick = function(e) {
+            container.addEventListener('click', function(e) {
                 const copyBtn = e.target.closest('.copy-single-btn');
                 if (copyBtn) {
                     e.stopPropagation();
@@ -2145,7 +2134,6 @@
         }
 
         let _pendingRecordRefresh = false;
-        let _pendingStudentRefresh = false;
         // 判断用户当前是否正在输入（焦点在输入框/文本域/可编辑元素）
         function isUserTyping() {
             const a = document.activeElement;
@@ -2646,17 +2634,12 @@
                 });
             });
 
-            // 输入框保护：用户停手（失焦）后，补刷同步期间被跳过的区域。
-            // 后台同步照常把最新数据拉进内存，但编辑中的输入框不会被重建打断；停手即见最新。
+            // 输入框保护：用户停手（失焦）后，若后台同步期间被跳过刷新，则立即补刷记录列表。
+            // 效果：自动同步照常把最新数据拉进内存，但编辑中的输入框不会被重建打断；停手即见最新。
             document.addEventListener('focusout', () => {
-                if (isUserTyping()) return;
-                if (_pendingRecordRefresh) {
+                if (_pendingRecordRefresh && !isUserTyping()) {
                     _pendingRecordRefresh = false;
-                    if (currentTab === 'record') setTimeout(() => refreshRecordList(), 400);
-                }
-                if (_pendingStudentRefresh) {
-                    _pendingStudentRefresh = false;
-                    if (currentTab === 'record') setTimeout(() => refreshStudentSelectors(), 400);
+                    setTimeout(() => { if (currentTab === 'record') refreshRecordList(); }, 400);
                 }
             });
 
