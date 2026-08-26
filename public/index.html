@@ -1771,6 +1771,20 @@
         }
 
         async function saveRecordToDB(record) {
+            // 去重检查：同一学生 + 同一天 + 同课堂内容已存在则跳过
+            if (!record.id) {
+                const dupDate = (record.recordDate || '').slice(0, 10);
+                const dup = records.find(r =>
+                    r.studentId === record.studentId &&
+                    r.classContent === record.classContent &&
+                    dupDate && r.recorddate && r.recorddate.slice(0, 10) === dupDate
+                );
+                if (dup) {
+                    console.log('[去重] 跳过重复记录:', record.studentName, record.classContent);
+                    showToast('该生今日此课堂内容已有记录，已跳过', true);
+                    return;
+                }
+            }
             const recordForDb = {
                 id: Math.floor(Number(record.id)),
                 studentId: Number(record.studentId),
@@ -2125,12 +2139,26 @@
                         showToast(`已保存 ${res.studentName}`);
                         const card = container.querySelector(`.result-card[data-idx="${idx}"]`);
                         if (card) card.remove();
+                        // 检查是否所有卡片都已保存，如果是则清空表单
+                        const remaining = container.querySelectorAll('.result-card').length;
+                        if (remaining <= 0) {
+                            const classContentInput = document.getElementById('classContentInput');
+                            if (classContentInput) classContentInput.value = '';
+                            document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+                        }
                     });
                 }
             });
 
             setLoading(genBtn, false);
             showToast(`✅ 生成完成，共 ${orderedResults.length} 份课评`);
+
+            // 生成完成后清空输入，防止重复保存
+            const classContentInput = document.getElementById('classContentInput');
+            if (classContentInput) classContentInput.value = '';
+            document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+            const genContainer = document.getElementById('generatedPreviews');
+            if (genContainer) genContainer.innerHTML = '';
         }
 
         let _pendingRecordRefresh = false;
