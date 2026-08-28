@@ -1,0 +1,16 @@
+name = "review-system"
+compatibility_date = "2026-07-29"
+pages_build_output_dir = "public"
+
+# Cloudflare D1 数据库绑定（database_id 由 `wrangler d1 create review-db` 生成后回填）
+[[d1_databases]]
+  binding = "REVIEW_DB"
+  database_id = "1650f6be-676f-4c87-81a1-93415d52e862"
+  database_name = "review-db"
+
+# 实时同步中枢（Durable Object）：维护在线设备 WebSocket，写入后广播变更。
+# DO 类定义在独立 Worker sync-hub-worker 中，Pages 通过 script_name 引用（Pages 不支持在 functions/ 内定义 DO 类）。
+[[durable_objects.bindings]]
+  name = "SYNC_HUB"
+  class_name = "SyncHub"
+  script_name = "sync-hub-worker"

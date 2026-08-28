@@ -1,0 +1,20 @@
+name = "sync-hub-worker"
+main = "index.js"
+compatibility_date = "2026-07-29"
+workers_dev = true
+
+# 实时同步中枢路由（keping.whatis.dpdns.org/api/sync/* → 本 Worker）已在 Cloudflare 控制台手动配置一次，
+# 这里不声明式配置，避免 CI 部署时因 CLOUDFLARE_API_TOKEN 缺少 Zone:Edit 权限而失败。
+# 如需 CI 自动管理路由，请给该 Token 增加 Zone → Zone → Edit 权限，并把下面 routes 加回：
+# routes = [
+#   { pattern = "keping.whatis.dpdns.org/api/sync/*", zone_name = "whatis.dpdns.org" }
+# ]
+
+# 本 Worker 定义并持有 SyncHub Durable Object（命名空间/storage 由此 Worker 的 migration 创建）
+[[durable_objects.bindings]]
+  name = "SYNC_HUB"
+  class_name = "SyncHub"
+
+[[migrations]]
+  tag = "v1"
+  new_sqlite_classes = ["SyncHub"]
