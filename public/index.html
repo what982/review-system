@@ -2153,12 +2153,10 @@
             setLoading(genBtn, false);
             showToast(`✅ 生成完成，共 ${orderedResults.length} 份课评`);
 
-            // 生成完成后清空输入，防止重复保存
+            // 生成完成后清空输入和勾选状态，防止重复保存；保留结果卡片供查看和编辑
             const classContentInput = document.getElementById('classContentInput');
             if (classContentInput) classContentInput.value = '';
             document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
-            const genContainer = document.getElementById('generatedPreviews');
-            if (genContainer) genContainer.innerHTML = '';
         }
 
         let _pendingRecordRefresh = false;
@@ -2658,6 +2656,27 @@
                     btn.classList.add('active');
                     document.getElementById(`tab-${tabId}`).classList.add('active');
                     currentTab = tabId;
+
+                    // 离开"生成课评"页面时自动清空输入状态，防止残留数据导致误操作或重复生成
+                    if (tabId !== 'record') {
+                        const classContentInput = document.getElementById('classContentInput');
+                        const generalPerfInput = document.getElementById('generalPerf');
+                        const generatedPreviews = document.getElementById('generatedPreviews');
+                        const previewProgressBar = document.getElementById('previewProgressBar');
+                        const previewProgressText = document.getElementById('previewProgressText');
+                        const individualPerfArea = document.getElementById('individualPerfArea');
+
+                        if (classContentInput) classContentInput.value = '';
+                        if (generalPerfInput) generalPerfInput.value = '';
+                        if (generatedPreviews) generatedPreviews.innerHTML = '';
+                        if (previewProgressBar) previewProgressBar.remove();
+                        if (previewProgressText) previewProgressText.remove();
+                        if (individualPerfArea) {
+                            individualPerfArea.innerHTML = '';
+                            individualPerfArea.style.display = 'none';
+                        }
+                    }
+
                     renderAllByTab();
                 });
             });
