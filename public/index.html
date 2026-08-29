@@ -1952,6 +1952,8 @@
         }
 
         function refreshStudentSelectors() {
+            // 用户正在输入时不重建列表，避免打断操作
+            if (isUserTyping()) { _pendingStudentRefresh = true; return; }
             const classFilter = document.getElementById('classFilterSelectGen').value;
             const nameFilter = document.getElementById('nameFilterSelectGen').value.trim().toLowerCase();
             let filtered = students.filter(s => (!classFilter || s.classId == classFilter) && (!nameFilter || s.name.toLowerCase().includes(nameFilter)));
@@ -2182,12 +2184,10 @@
             const classContentInput = document.getElementById('classContentInput');
             if (classContentInput) classContentInput.value = '';
             document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
-            // 清空已有结果卡片，防止再次点击生成时重复
-            const genContainer = document.getElementById('generatedPreviews');
-            if (genContainer) genContainer.innerHTML = '';
         }
 
         let _pendingRecordRefresh = false;
+        let _pendingStudentRefresh = false;
         // 判断用户当前是否正在输入（焦点在输入框/文本域/可编辑元素）
         function isUserTyping() {
             const a = document.activeElement;
@@ -2715,6 +2715,10 @@
                 if (_pendingRecordRefresh && !isUserTyping()) {
                     _pendingRecordRefresh = false;
                     setTimeout(() => { if (currentTab === 'record') refreshRecordList(); }, 400);
+                }
+                if (_pendingStudentRefresh && !isUserTyping() && currentTab === 'record') {
+                    _pendingStudentRefresh = false;
+                    setTimeout(() => { if (currentTab === 'record') refreshStudentSelectors(); }, 400);
                 }
             });
 
