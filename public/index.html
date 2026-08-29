@@ -2011,21 +2011,28 @@
             const progressSpan = document.getElementById('previewProgressText');
             if (progFill) progFill.style.width = '10%';
 
-            async function fetchReview(student, maxRetries = 2) {
+            async function fetchReview(student, maxRetries = 2, prevReviews = []) {
                 const perfInfo = student.perf || '无特别说明';
                 const temperature = 0.7 + Math.random() * 0.4;
+
+                // 已生成的评语摘要，用于差异化提示
+                const prevContext = prevReviews.length > 0
+                    ? `\n\n【已生成评语参考，请确保你的评语与此有明显区别】\n${prevReviews.map(r => `${r.studentName}：${r.reviewText.slice(0, 40)}...`).join('\n')}`
+                    : '';
+
                 const prompt = `请为"${student.name}"同学写一段课后评语：
 
 1. 开头以"${student.name}本节课……"开始，围绕课堂内容"${classContent}"展开
 2. 严格控制在${targetWords}字左右（正负不超过3字）
 3. 风格：口语化，自然真实，像老师随口聊
-4. 基于该生表现："${perfInfo}"
+4. 基于该生表现："${perfInfo}"，从该生具体表现切入，不要泛泛而谈
 5. 全文不能出现"你""她""他"字，直接用名字或"该生"
 6. 多加合适的表情符号（如😊或👍）
 7. 确保评语针对本节课"${classContent}"专属评价
-8. 如果同时为多名学生生成，确保评语用语、句式、侧重点明显不同
+8. 每位学生的评语侧重点必须不同：有的突出课堂互动，有的突出知识掌握，有的突出进步建议，避免千篇一律
 9. 严禁出现"今天学习了什么"这类总结式表述，也严禁出现"主题"二字（不要写"本节课的主题是……""本堂课的主题是……"等）
 10. 写成连贯的一段口语化评语，不要用标题、分点、冒号列举等格式化写法
+11. 评语要突出该生独特的表现特点${prevContext}
 
 直接输出评语文本，不加任何解释。`;
 
@@ -2052,15 +2059,13 @@
                 return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: '生成失败', charCount: 0 };
             }
 
-            const concurrencyLimit = 3;
             const results = [];
-            const queue = [...studentList];
             let completed = 0;
 
-            async function worker() {
-                while (queue.length) {
-                    const student = queue.shift();
-                    const result = await fetchReview(student);
+            try {
+                // 顺序调用，每次传入已生成的结果作为上下文
+                for (const student of studentList) {
+                    const result = await fetchReview(student, 2, results);
                     results.push(result);
                     completed++;
                     // 更新进度条
@@ -2068,9 +2073,6 @@
                     if (progressSpan) progressSpan.textContent = `进度: ${completed}/${studentList.length} (${pct}%)`;
                     if (progFill) progFill.style.width = pct + '%';
                 }
-            }
-            try {
-                await Promise.all(Array(Math.min(concurrencyLimit, studentList.length)).fill().map(() => worker()));
             } catch (err) {
                 console.error('生成异常:', err);
                 setLoading(genBtn, false);
@@ -2080,7 +2082,13 @@
 
             // 全部完成后一次性渲染，避免反复改写容器
             if (progFill) progFill.style.width = '100%';
-            setTimeout(() => { if (progFill) progFill.style.width = '0%'; }, 1000);
+            // 500ms后移除进度条，防止卡住不消失
+            setTimeout(() => {
+                const wrap = document.getElementById('previewProgressBar');
+                const txt = document.getElementById('previewProgressText');
+                if (wrap) wrap.remove();
+                if (txt) txt.remove();
+            }, 500);
 
             const orderedResults = studentList.map(st => {
                 const found = results.find(r => r.studentId === st.id);
@@ -2157,6 +2165,9 @@
             const classContentInput = document.getElementById('classContentInput');
             if (classContentInput) classContentInput.value = '';
             document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+            // 清空已有结果卡片，防止再次点击生成时重复
+            const genContainer = document.getElementById('generatedPreviews');
+            if (genContainer) genContainer.innerHTML = '';
         }
 
         let _pendingRecordRefresh = false;
