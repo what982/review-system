@@ -1345,8 +1345,7 @@
         }
         window.addEventListener('pagehide', flushOnExit);
         window.addEventListener('beforeunload', flushOnExit);
-        // 兜底轮询：每 15 秒拉取一次（实时 WebSocket 为主，轮询为容错）
-        setInterval(() => { if (!document.hidden) syncNow().catch(console.error); }, 15000);
+        // 页面可见时自动同步（先推后拉），不再定时轮询，避免干扰输入
 
         // ─── 实时推送（Cloudflare Durable Object WebSocket 中枢）───
         // 任一设备写入后，服务端会向所有在线设备广播 "changed"，本机收到后立即拉取最新数据，
