@@ -1148,6 +1148,8 @@
         let individualPerfMap = {};
         let currentTab = "record";
         let _bindingsBound = false;
+        let _genResults = [];      // 最近一次生成的课评结果（供保存/复制委托使用）
+        let _batchResults = [];    // 最近一次批量月度总结结果
 
         // ─── IndexedDB 本地缓存层 ────────────────────────────────
         const DB_NAME = 'CourseReviewDB';
@@ -1787,19 +1789,18 @@
         }
 
         async function saveRecordToDB(record) {
-            // 去重检查：同一学生 + 同一天 + 同课堂内容已存在则跳过
-            if (!record.id) {
-                const dupDate = (record.recordDate || '').slice(0, 10);
-                const dup = records.find(r =>
-                    r.studentId === record.studentId &&
-                    r.classContent === record.classContent &&
-                    dupDate && r.recorddate && r.recorddate.slice(0, 10) === dupDate
-                );
-                if (dup) {
-                    console.log('[去重] 跳过重复记录:', record.studentName, record.classContent);
-                    showToast('该生今日此课堂内容已有记录，已跳过', true);
-                    return;
-                }
+            // 去重检查：同一学生 + 同一天 + 同课堂内容已存在则跳过（排除编辑自身）
+            const dupDate = (record.recordDate || record.recorddate || '').slice(0, 10);
+            const dup = records.find(r =>
+                r.studentId === Number(record.studentId) &&
+                r.classContent === String(record.classContent) &&
+                dupDate && r.recorddate && r.recorddate.slice(0, 10) === dupDate &&
+                Number(r.id) !== Number(record.id)
+            );
+            if (dup) {
+                console.log('[去重] 跳过重复记录:', record.studentName, record.classContent);
+                showToast('该生今日此课堂内容已有记录，已跳过', true);
+                return;
             }
             const recordForDb = {
                 id: Math.floor(Number(record.id)),
@@ -1959,7 +1960,7 @@
             const container = document.getElementById('studentChecklist');
             if (!container) return;
             if (filtered.length === 0) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">暂无学生</div>'; return; }
-            container.innerHTML = filtered.map(s => `<label class="student-tag"><input type="checkbox" class="stuCheckItem" value="${s.id}" ${selectedStudentIds.has(parseInt(s.id)) ? 'checked' : ''}> ${escapeHtml(s.name)} (${getClassNameById(s.classId)})</label>`).join('');
+            container.innerHTML = filtered.map(s => `<label class="student-tag"><input type="checkbox" class="stuCheckItem" value="${s.id}" ${selectedStudentIds.has(parseInt(s.id)) ? 'checked' : ''}> ${escapeHtml(s.name)} (${escapeHtml(getClassNameById(s.classId))})</label>`).join('');
             renderIndividualPerfInputs(filtered);
         }
         function renderIndividualPerfInputs(filteredStudents) {
@@ -2133,48 +2134,8 @@
                 </div>`;
             }).join('');
 
-            // 事件委托：生成的卡片按钮（用容器的点击事件统一处理，避免逐个绑定）
-            container.addEventListener('click', function(e) {
-                const copyBtn = e.target.closest('.copy-single-btn');
-                if (copyBtn) {
-                    e.stopPropagation();
-                    const idx = parseInt(copyBtn.dataset.idx);
-                    const textarea = container.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
-                    const res = orderedResults[idx];
-                    if (textarea && res) {
-                        navigator.clipboard.writeText(textarea.value);
-                        showToast(`已复制 ${res.studentName}`);
-                    }
-                    return;
-                }
-                const saveBtn = e.target.closest('.save-single-btn');
-                if (saveBtn) {
-                    e.stopPropagation();
-                    const idx = parseInt(saveBtn.dataset.idx);
-                    const textarea = container.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
-                    const res = orderedResults[idx];
-                    if (!textarea || !res) return;
-                    const finalReview = textarea.value.trim();
-                    if (finalReview.includes('生成失败')) { showToast('课评无效', true); return; }
-                    const now = new Date();
-                    saveRecordToDB({
-                        id: genId(), studentId: res.studentId, studentName: res.studentName,
-                        classId: res.classId, classTopic: res.classTopic, classContent: res.classContent, reviewText: finalReview,
-                        recordDate: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
-                    }).catch(console.error).then(() => {
-                        showToast(`已保存 ${res.studentName}`);
-                        const card = container.querySelector(`.result-card[data-idx="${idx}"]`);
-                        if (card) card.remove();
-                        // 检查是否所有卡片都已保存，如果是则清空表单
-                        const remaining = container.querySelectorAll('.result-card').length;
-                        if (remaining <= 0) {
-                            const classContentInput = document.getElementById('classContentInput');
-                            if (classContentInput) classContentInput.value = '';
-                            document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
-                        }
-                    });
-                }
-            });
+            // 保存结果供委托事件使用（事件已统一绑定到容器，见 initMainSystem）
+            _genResults = orderedResults;
 
             setLoading(genBtn, false);
             showToast(`✅ 生成完成，共 ${orderedResults.length} 份课评`);
@@ -2183,6 +2144,7 @@
             const classContentInput = document.getElementById('classContentInput');
             if (classContentInput) classContentInput.value = '';
             document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+            selectedStudentIds.clear();
         }
 
         let _pendingRecordRefresh = false;
@@ -2303,7 +2265,7 @@
             const sel = document.getElementById('studentSelect');
             if (sel) {
                 if (!filtered.length) { sel.innerHTML = '<option value="">暂无学生</option>'; }
-                else { sel.innerHTML = '<option value="">请选择学生</option>' + filtered.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${getClassNameById(s.classId)})</option>`).join(''); }
+                else { sel.innerHTML = '<option value="">请选择学生</option>' + filtered.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(getClassNameById(s.classId))})</option>`).join(''); }
             }
             if (filtered.length === 1 && sel) sel.value = filtered[0].id;
             renderBatchStudentList();
@@ -2495,28 +2457,8 @@
             });
             batchContainer.replaceChildren(...rendered);
 
-            // 批量结果复制按钮委托
-            batchContainer.addEventListener('click', function(e) {
-                const contentBtn = e.target.closest('.copyBatchContentBtn');
-                if (contentBtn) {
-                    e.stopPropagation();
-                    const result = results[Array.from(batchContainer.children).indexOf(contentBtn.closest('.batch-result'))];
-                    if (result && !result.error) {
-                        navigator.clipboard.writeText(result.contentSummaryHtml);
-                        showToast('已复制');
-                    }
-                    return;
-                }
-                const summaryBtn = e.target.closest('.copyBatchSummaryBtn');
-                if (summaryBtn) {
-                    e.stopPropagation();
-                    const result = results[Array.from(batchContainer.children).indexOf(summaryBtn.closest('.batch-result'))];
-                    if (result && !result.error) {
-                        navigator.clipboard.writeText(result.summary);
-                        showToast('已复制');
-                    }
-                }
-            });
+            // 保存结果供委托事件使用（事件已统一绑定到容器，见 initMainSystem）
+            _batchResults = results;
         }
         function bindMonthlyBatchEvents() {
             const btn = document.getElementById('batchGenerateSummariesBtn');
@@ -2702,6 +2644,8 @@
                             individualPerfArea.innerHTML = '';
                             individualPerfArea.style.display = 'none';
                         }
+                        document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+                        selectedStudentIds.clear();
                     }
 
                     renderAllByTab();
@@ -2813,6 +2757,80 @@
                 });
                 checklistEl.dataset.bound = '1';
             }
+            // 生成结果卡片按钮委托（只绑一次，避免每次生成重复叠加监听器）
+            const genContainer = document.getElementById('generatedPreviews');
+            if (genContainer && !genContainer.dataset.bound) {
+                genContainer.addEventListener('click', function(e) {
+                    const copyBtn = e.target.closest('.copy-single-btn');
+                    if (copyBtn) {
+                        e.stopPropagation();
+                        const idx = parseInt(copyBtn.dataset.idx);
+                        const textarea = genContainer.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
+                        const res = _genResults[idx];
+                        if (textarea && res) {
+                            navigator.clipboard.writeText(textarea.value);
+                            showToast(`已复制 ${res.studentName}`);
+                        }
+                        return;
+                    }
+                    const saveBtn = e.target.closest('.save-single-btn');
+                    if (saveBtn) {
+                        e.stopPropagation();
+                        const idx = parseInt(saveBtn.dataset.idx);
+                        const textarea = genContainer.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
+                        const res = _genResults[idx];
+                        if (!textarea || !res) return;
+                        const finalReview = textarea.value.trim();
+                        if (finalReview.includes('生成失败')) { showToast('课评无效', true); return; }
+                        const now = new Date();
+                        saveRecordToDB({
+                            id: genId(), studentId: res.studentId, studentName: res.studentName,
+                            classId: res.classId, classTopic: res.classTopic, classContent: res.classContent, reviewText: finalReview,
+                            recordDate: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
+                        }).then(() => {
+                            showToast(`已保存 ${res.studentName}`);
+                            const card = genContainer.querySelector(`.result-card[data-idx="${idx}"]`);
+                            if (card) card.remove();
+                            const remaining = genContainer.querySelectorAll('.result-card').length;
+                            if (remaining <= 0) {
+                                const classContentInput = document.getElementById('classContentInput');
+                                if (classContentInput) classContentInput.value = '';
+                                document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+                                selectedStudentIds.clear();
+                            }
+                        }).catch(() => {
+                            showToast('保存失败，请重试', true);
+                        });
+                    }
+                });
+                genContainer.dataset.bound = '1';
+            }
+            // 批量结果卡片按钮委托（只绑一次）
+            const batchContainer = document.getElementById('batchResultsContainer');
+            if (batchContainer && !batchContainer.dataset.bound) {
+                batchContainer.addEventListener('click', function(e) {
+                    const contentBtn = e.target.closest('.copyBatchContentBtn');
+                    if (contentBtn) {
+                        e.stopPropagation();
+                        const result = _batchResults[Array.from(batchContainer.children).indexOf(contentBtn.closest('.batch-result'))];
+                        if (result && !result.error) {
+                            navigator.clipboard.writeText(result.contentSummaryHtml);
+                            showToast('已复制');
+                        }
+                        return;
+                    }
+                    const summaryBtn = e.target.closest('.copyBatchSummaryBtn');
+                    if (summaryBtn) {
+                        e.stopPropagation();
+                        const result = _batchResults[Array.from(batchContainer.children).indexOf(summaryBtn.closest('.batch-result'))];
+                        if (result && !result.error) {
+                            navigator.clipboard.writeText(result.summary);
+                            showToast('已复制');
+                        }
+                    }
+                });
+                batchContainer.dataset.bound = '1';
+            }
             document.getElementById('toggleIndividualBtn').addEventListener('click', () => {
                 const area = document.getElementById('individualPerfArea');
                 area.style.display = area.style.display === 'none' ? 'block' : 'none';
@@ -2851,7 +2869,7 @@
             document.getElementById('addRecordBtn').addEventListener('click', () => {
                 const modalSel = document.getElementById('modalStudentSelect');
                 if (modalSel && students.length) {
-                    modalSel.innerHTML = '<option value="">请选择学生</option>' + students.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}" data-class="${s.classId}">${escapeHtml(s.name)} (${getClassNameById(s.classId)})</option>`).join('');
+                    modalSel.innerHTML = '<option value="">请选择学生</option>' + students.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}" data-class="${s.classId}">${escapeHtml(s.name)} (${escapeHtml(getClassNameById(s.classId))})</option>`).join('');
                 }
                 document.getElementById('modalClassTopic').value = '';
                 document.getElementById('modalClassContent').value = '';
@@ -2999,7 +3017,7 @@
             // Ctrl+G - 生成课评预览
             if (e.ctrlKey && e.key === 'g') {
                 e.preventDefault();
-                if (currentTab === 'preview') generatePreviews();
+                if (currentTab === 'record') generatePreviews();
                 else showToast('请先切换到"生成课评"标签', true);
             }
             // Ctrl+B - 批量生成月度总结
