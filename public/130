@@ -948,9 +948,9 @@
                     <div class="range-wrap" style="margin-bottom:16px;">
                         <div class="range-header">
                             <label style="margin:0;">🎯 目标字数/生</label>
-                            <span id="wordCountValue" class="range-value">130</span>
+                            <span id="wordCountValue" class="range-value">150</span>
                         </div>
-                        <input type="range" id="wordSlider" min="60" max="300" value="130" step="5">
+                        <input type="range" id="wordSlider" min="60" max="300" value="150" step="5">
                     </div>
                     <div class="toolbar">
                         <div class="form-group"><label>班级筛选</label><select id="classFilterSelectGen"></select></div>
