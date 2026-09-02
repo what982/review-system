@@ -266,6 +266,23 @@
         .btn-sm { min-width: 64px; flex-shrink: 0; }
         .card-header .btn-group { gap: 6px; }
         .card-header .btn-sm { min-width: 52px; font-size: 12px; padding: 6px 10px; }
+
+        /* 按钮行 - 独立一行显示批量操作 */
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg);
+        }
+        .btn-row .btn {
+            flex: 1;
+            min-width: 100px;
+            text-align: center;
+            padding: 10px 16px;
+            font-size: 14px;
+        }
         
         /* 学生选择 */
         .student-tags {
@@ -792,6 +809,7 @@
             width: 0%;
         }
     </style>
+    <script src="xlsx.mini.min.js"></script>
 </head>
 <body>
 
@@ -914,11 +932,13 @@
                 <div class="card-header"><h3>💾 数据备份</h3></div>
                 <div class="card-body">
                     <div class="btn-group">
-                        <button id="exportDataBtn" class="btn-primary">📤 导出备份</button>
-                        <button id="importDataBtn" class="btn-secondary">📥 导入备份</button>
+                        <button id="exportExcelBtn" class="btn-primary">📤 导出Excel</button>
+                        <button id="importExcelBtn" class="btn-secondary">📥 导入Excel</button>
+                        <button id="exportDataBtn" class="btn-secondary">📦 导出备份(JSON)</button>
+                        <button id="importDataBtn" class="btn-secondary">♻️ 恢复备份(JSON)</button>
                         <button id="clearAllDataBtn" class="btn-danger">⚠️ 清空所有数据</button>
                     </div>
-                    <div class="info-tip">导出备份可迁移数据，导入将覆盖现有数据</div>
+                    <div class="info-tip">Excel 便于查看/批量编辑；JSON 为完整备份，可完整迁移与恢复</div>
                 </div>
             </div>
         </div>
@@ -957,13 +977,13 @@
             <div class="card">
                 <div class="card-header">
                     <h3>📋 课堂记录</h3>
-                    <div class="btn-group">
-                        <button id="batchDeleteBtn" class="btn-danger btn-sm">批量删除</button>
-                        <button id="batchEditSelectedBtn" class="btn-primary btn-sm">批量编辑</button>
-                        <button id="batchDeleteFilteredBtn" class="btn-danger btn-sm">删除筛选</button>
-                        <button id="selectAllRecordsBtn" class="btn-secondary btn-sm">全选</button>
-                        <button id="addRecordBtn" class="btn-primary btn-sm">新增记录</button>
-                    </div>
+                </div>
+                <div class="btn-row">
+                    <button id="batchDeleteBtn" class="btn btn-danger">批量删除</button>
+                    <button id="batchEditSelectedBtn" class="btn btn-primary">批量编辑</button>
+                    <button id="selectAllRecordsBtn" class="btn btn-secondary">全选</button>
+                    <button id="batchDeleteFilteredBtn" class="btn btn-danger">删除筛选</button>
+                    <button id="addRecordBtn" class="btn btn-primary">新增记录</button>
                 </div>
                 <div class="card-body">
                     <div class="toolbar">
@@ -1121,6 +1141,22 @@
                 if (!res.ok) throw new Error(`删除${table}失败: HTTP ${res.status}`);
                 return await res.json();
             },
+            // 批量删除：按 store 分批（每批至多 500 个）发送 {ids:[...]}，减少请求数
+            async removeMany(table, ids) {
+                if (!ids || !ids.length) return;
+                const BATCH = 500;
+                for (let i = 0; i < ids.length; i += BATCH) {
+                    const chunk = ids.slice(i, i + BATCH);
+                    const res = await fetch(`${API_BASE}/${table}`, {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ ids: chunk })
+                    });
+                    if (!res.ok) { const t = await res.text(); throw new Error(`批量删除${table}失败: ${t}`); }
+                }
+                return { ok: true };
+            },
             async ping() {
                 try { const res = await fetch(`${API_BASE}/ping`, { method: 'GET', credentials: 'include' }); return res.ok; }
                 catch (e) { return false; }
@@ -1131,6 +1167,8 @@
         let individualPerfMap = {};
         let currentTab = "record";
         let _bindingsBound = false;
+        let _genResults = [];      // 最近一次生成的课评结果（供保存/复制委托使用）
+        let _batchResults = [];    // 最近一次批量月度总结结果
 
         // ─── IndexedDB 本地缓存层 ────────────────────────────────
         const DB_NAME = 'CourseReviewDB';
@@ -1213,6 +1251,29 @@
             updateSyncBadge();
         }
 
+        // 批量写入（单事务），替代逐条 await idbPut，提升大量数据写入性能
+        async function idbPutMany(store, rows) {
+            if (!idbDB || !rows || !rows.length) return;
+            return new Promise((resolve, reject) => {
+                const tx = idbDB.transaction(store, 'readwrite');
+                const os = tx.objectStore(store);
+                for (const r of rows) os.put(r);
+                tx.oncomplete = () => resolve();
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        }
+        // 批量删除（单事务），用于同步完成后只清除已成功推送的 pending 条目
+        async function idbDeleteMany(store, ids) {
+            if (!idbDB || !ids || !ids.length) return;
+            return new Promise((resolve, reject) => {
+                const tx = idbDB.transaction(store, 'readwrite');
+                const os = tx.objectStore(store);
+                for (const id of ids) os.delete(id);
+                tx.oncomplete = () => resolve();
+                tx.onerror = (e) => reject(e.target.error);
+            });
+        }
+
         function updateSyncBadge() {
             const badge = document.getElementById('syncStatusBadge');
             const btn = document.getElementById('syncNowBtn');
@@ -1258,17 +1319,24 @@
                     else byStore[item.store].inserts.push(item.data);
                 }
 
+                // 记录本次推送的 pending 条目 id，成功后只清这些（避免清空推送期间新产生的本地改动）
+                const pushedPendingIds = pending.map(p => p.id);
                 // 并发执行所有 DB 操作（统一走同源 /api → D1）
                 await Promise.all(Object.entries(byStore).map(async ([store, ops]) => {
                     const table = store; // store 即 'classes' | 'students' | 'records'，与 API 端点同名
                     const all = ops.inserts.concat(ops.updates);
-                    if (all.length) await api.upsert(table, all);
-                    if (ops.deletes.length) {
-                        for (const id of ops.deletes) await api.remove(table, id);
+                    if (all.length) {
+                        // 分批（每批 200）推送，避免单次请求体过大
+                        for (let i = 0; i < all.length; i += 200) {
+                            await api.upsert(table, all.slice(i, i + 200));
+                        }
                     }
+                    if (ops.deletes.length) await api.removeMany(table, ops.deletes);
                 }));
 
-                await idbClearPending();
+                // 只清除已成功推送的 pending 条目，其余（推送期间新产生的）保留待下次同步
+                await idbDeleteMany('pending', pushedPendingIds);
+                pendingCache = pendingCache.filter(p => !pushedPendingIds.includes(p.id));
                 await refreshAllData(true); // 同步成功后强制从云端拉取最新
                 showToast('✅ 已同步到云端');
             } catch (err) {
@@ -1328,8 +1396,7 @@
         }
         window.addEventListener('pagehide', flushOnExit);
         window.addEventListener('beforeunload', flushOnExit);
-        // 兜底轮询：每 15 秒拉取一次（实时 WebSocket 为主，轮询为容错）
-        setInterval(() => { if (!document.hidden) syncNow().catch(console.error); }, 15000);
+        // 页面可见时自动同步（先推后拉），不再定时轮询，避免干扰输入
 
         // ─── 实时推送（Cloudflare Durable Object WebSocket 中枢）───
         // 任一设备写入后，服务端会向所有在线设备广播 "changed"，本机收到后立即拉取最新数据，
@@ -1502,15 +1569,25 @@
             return Date.now() * 1000 + Math.floor(Math.random() * 1000);
         }
 
-        // pull 云端数据时，把本机已新建但尚未上传到云端的数据合并回内存，
-        // 避免被云端返回的数据覆盖而导致本地新建记录"看不见"（先推后拉场景下 flush 失败时尤其重要）
-        async function mergeLocalInserts(store, cloudData) {
+        // pull 云端数据时，用本机 pending 队列对云端结果做二次校正：
+        //  1) 剔除本机已删、云端还在的记录（修复"已删数据被云端拉回复活"）
+        //  2) 用本机已改、云端还没更新的数据覆盖云端旧值
+        //  3) 补齐本机新建、云端还没有的数据
+        // 注：pending 推送成功后会被清空，此时本函数退化为透传，不影响正常同步路径。
+        async function mergeLocalOverrides(store, cloudData) {
             try {
                 const pendings = await idbGetPending();
-                const inserts = pendings.filter(p => p.store === store && p.action === 'insert').map(p => p.data);
-                const cloudIds = new Set(cloudData.map(d => d.id));
-                const extra = inserts.filter(d => d && d.id != null && !cloudIds.has(d.id));
-                return cloudData.concat(extra);
+                const delIds = new Set(pendings.filter(p => p.store === store && p.action === 'delete').map(p => String(p.data.id)));
+                const updMap = new Map(pendings.filter(p => p.store === store && p.action === 'update').map(p => [String(p.data.id), p.data]));
+                const insMap = new Map(pendings.filter(p => p.store === store && p.action === 'insert' && p.data && p.data.id != null).map(p => [String(p.data.id), p.data]));
+                let out = cloudData.filter(d => !delIds.has(String(d.id)));
+                out = out.map(d => {
+                    const u = updMap.get(String(d.id));
+                    return u ? Object.assign({}, d, u) : d;
+                });
+                const cloudIds = new Set(out.map(d => String(d.id)));
+                const extra = [...insMap.values()].filter(d => !cloudIds.has(String(d.id)));
+                return out.concat(extra);
             } catch (e) { return cloudData; }
         }
 
@@ -1523,7 +1600,7 @@
             try { result = await api.list('classes'); }
             catch (e) { showToast('加载班级失败: ' + e.message, true); return classes; }
             result = result || [];
-            result = await mergeLocalInserts('classes', result);
+            result = await mergeLocalOverrides('classes', result);
             classes = result;
             _cacheTs.classes = Date.now();
             // 写入 IndexedDB
@@ -1542,7 +1619,7 @@
             try { result = await api.list('students'); }
             catch (e) { showToast('加载学生失败: ' + e.message, true); return students; }
             result = result || [];
-            result = await mergeLocalInserts('students', result);
+            result = await mergeLocalOverrides('students', result);
             students = result;
             _cacheTs.students = Date.now();
             for (const s of students) await idbPut('students', s);
@@ -1558,10 +1635,10 @@
             try { result = await api.list('records'); }
             catch (e) { showToast('加载记录失败: ' + e.message, true); return records; }
             result = result || [];
-            result = await mergeLocalInserts('records', result);
+            result = await mergeLocalOverrides('records', result);
             records = result;
             _cacheTs.records = Date.now();
-            for (const r of records) await idbPut('records', r);
+            await idbPutMany('records', records).catch(e => console.warn('[同步] 记录写入本地失败', e));
             refreshRecordMap();
             return result;
         }
@@ -1771,19 +1848,18 @@
         }
 
         async function saveRecordToDB(record) {
-            // 去重检查：同一学生 + 同一天 + 同课堂内容已存在则跳过
-            if (!record.id) {
-                const dupDate = (record.recordDate || '').slice(0, 10);
-                const dup = records.find(r =>
-                    r.studentId === record.studentId &&
-                    r.classContent === record.classContent &&
-                    dupDate && r.recorddate && r.recorddate.slice(0, 10) === dupDate
-                );
-                if (dup) {
-                    console.log('[去重] 跳过重复记录:', record.studentName, record.classContent);
-                    showToast('该生今日此课堂内容已有记录，已跳过', true);
-                    return;
-                }
+            // 去重检查：同一学生 + 同一天 + 同课堂内容已存在则跳过（排除编辑自身）
+            const dupDate = (record.recordDate || record.recorddate || '').slice(0, 10);
+            const dup = records.find(r =>
+                r.studentId === Number(record.studentId) &&
+                r.classContent === String(record.classContent) &&
+                dupDate && r.recorddate && r.recorddate.slice(0, 10) === dupDate &&
+                Number(r.id) !== Number(record.id)
+            );
+            if (dup) {
+                console.log('[去重] 跳过重复记录:', record.studentName, record.classContent);
+                showToast('该生今日此课堂内容已有记录，已跳过', true);
+                return;
             }
             const recordForDb = {
                 id: Math.floor(Number(record.id)),
@@ -1935,19 +2011,25 @@
         }
 
         function refreshStudentSelectors() {
+            // 用户正在输入时不重建列表，避免打断操作
+            if (isUserTyping()) { _pendingStudentRefresh = true; return; }
             const classFilter = document.getElementById('classFilterSelectGen').value;
             const nameFilter = document.getElementById('nameFilterSelectGen').value.trim().toLowerCase();
             let filtered = students.filter(s => (!classFilter || s.classId == classFilter) && (!nameFilter || s.name.toLowerCase().includes(nameFilter)));
             const container = document.getElementById('studentChecklist');
             if (!container) return;
             if (filtered.length === 0) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">暂无学生</div>'; return; }
-            container.innerHTML = filtered.map(s => `<label class="student-tag"><input type="checkbox" class="stuCheckItem" value="${s.id}" ${selectedStudentIds.has(parseInt(s.id)) ? 'checked' : ''}> ${escapeHtml(s.name)} (${getClassNameById(s.classId)})</label>`).join('');
-            renderIndividualPerfInputs(filtered);
+            container.innerHTML = filtered.map(s => `<label class="student-tag"><input type="checkbox" class="stuCheckItem" value="${s.id}" ${selectedStudentIds.has(parseInt(s.id)) ? 'checked' : ''}> ${escapeHtml(s.name)} (${escapeHtml(getClassNameById(s.classId))})</label>`).join('');
+            // 只显示已勾选学生的单独表现输入框，避免整班学生占满面板
+            renderIndividualPerfInputs(filtered.filter(s => selectedStudentIds.has(parseInt(s.id))));
         }
         function renderIndividualPerfInputs(filteredStudents) {
             const area = document.getElementById('individualPerfArea');
             if (!area) return;
-            if (filteredStudents.length === 0) { area.innerHTML = ''; return; }
+            if (filteredStudents.length === 0) {
+                area.innerHTML = '<div style="color:var(--text-muted);padding:6px 0;">请先在上方勾选学生，勾选后即可逐人填写表现</div>';
+                return;
+            }
             area.innerHTML = filteredStudents.map(s => {
                 const saved = individualPerfMap[s.id] || '';
                 return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="width:80px;font-weight:600;">${escapeHtml(s.name)}</span><input type="text" class="ind-perf-input" data-id="${s.id}" placeholder="特殊表现（选填）" value="${escapeHtml(saved)}" style="flex:1;"></div>`;
@@ -1990,7 +2072,8 @@
             const studentList = [];
             for (const cb of selectedBoxes) {
                 const student = studentMap.get(parseInt(cb.value)) || studentMap.get(cb.value);
-                if (student) studentList.push({ id: student.id, name: student.name, classId: student.classId, perf: individualPerfMap[student.id] || generalPerf || '', classTopic: parsedContent.classTopic, classContent: parsedContent.classContent });
+                // 通用表现（全班共性）与单独表现（该生个性）分开传，两者都要进提示词
+                if (student) studentList.push({ id: student.id, name: student.name, classId: student.classId, generalPerf: generalPerf || '', perf: individualPerfMap[student.id] || '', classTopic: parsedContent.classTopic, classContent: parsedContent.classContent });
             }
             if (!studentList.length) { showToast('未找到有效学生', true); setLoading(genBtn, false); return; }
 
@@ -2011,21 +2094,29 @@
             const progressSpan = document.getElementById('previewProgressText');
             if (progFill) progFill.style.width = '10%';
 
-            async function fetchReview(student, maxRetries = 2) {
-                const perfInfo = student.perf || '无特别说明';
+            async function fetchReview(student, maxRetries = 2, prevReviews = []) {
                 const temperature = 0.7 + Math.random() * 0.4;
+
+                // 已生成的评语摘要，用于差异化提示（过滤失败条目，避免污染后续提示）
+                const validPrev = prevReviews.filter(r => r.reviewText && !r.reviewText.includes('生成失败'));
+                const prevContext = validPrev.length > 0
+                    ? `\n\n【其他同学已生成的评语参考，请确保你的评语在句式、切入点、结尾建议上都与此有明显区别】\n${validPrev.map(r => `${r.studentName}：${r.reviewText.slice(0, 90)}...`).join('\n')}`
+                    : '';
+
                 const prompt = `请为"${student.name}"同学写一段课后评语：
 
 1. 开头以"${student.name}本节课……"开始，围绕课堂内容"${classContent}"展开
 2. 严格控制在${targetWords}字左右（正负不超过3字）
 3. 风格：口语化，自然真实，像老师随口聊
-4. 基于该生表现："${perfInfo}"
-5. 全文不能出现"你""她""他"字，直接用名字或"该生"
-6. 多加合适的表情符号（如😊或👍）
-7. 确保评语针对本节课"${classContent}"专属评价
-8. 如果同时为多名学生生成，确保评语用语、句式、侧重点明显不同
-9. 严禁出现"今天学习了什么"这类总结式表述，也严禁出现"主题"二字（不要写"本节课的主题是……""本堂课的主题是……"等）
-10. 写成连贯的一段口语化评语，不要用标题、分点、冒号列举等格式化写法
+4. 本班整体表现（全班共有的情况，作为背景铺垫）："${student.generalPerf || '未填写，可不体现'}"
+5. 该生特别表现（只属于该生的情况，必须重点体现）："${student.perf || '未填写，请结合该生情况合理发挥'}"，从该生具体表现切入，不要泛泛而谈，也不要只复述班级共性
+6. 全文不能出现"你""她""他"字，直接用名字或"该生"
+7. 多加合适的表情符号（如😊或👍）
+8. 确保评语针对本节课"${classContent}"专属评价
+9. 每位学生的评语侧重点必须不同：有的突出课堂互动，有的突出知识掌握，有的突出进步建议，避免千篇一律
+10. 严禁出现"今天学习了什么"这类总结式表述，也严禁出现"主题"二字（不要写"本节课的主题是……""本堂课的主题是……"等）
+11. 写成连贯的一段口语化评语，不要用标题、分点、冒号列举等格式化写法
+12. 评语要突出该生独特的表现特点${prevContext}
 
 直接输出评语文本，不加任何解释。`;
 
@@ -2052,15 +2143,13 @@
                 return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: '生成失败', charCount: 0 };
             }
 
-            const concurrencyLimit = 3;
             const results = [];
-            const queue = [...studentList];
             let completed = 0;
 
-            async function worker() {
-                while (queue.length) {
-                    const student = queue.shift();
-                    const result = await fetchReview(student);
+            try {
+                // 顺序调用，每次传入已生成的结果作为上下文
+                for (const student of studentList) {
+                    const result = await fetchReview(student, 2, results);
                     results.push(result);
                     completed++;
                     // 更新进度条
@@ -2068,9 +2157,6 @@
                     if (progressSpan) progressSpan.textContent = `进度: ${completed}/${studentList.length} (${pct}%)`;
                     if (progFill) progFill.style.width = pct + '%';
                 }
-            }
-            try {
-                await Promise.all(Array(Math.min(concurrencyLimit, studentList.length)).fill().map(() => worker()));
             } catch (err) {
                 console.error('生成异常:', err);
                 setLoading(genBtn, false);
@@ -2080,7 +2166,13 @@
 
             // 全部完成后一次性渲染，避免反复改写容器
             if (progFill) progFill.style.width = '100%';
-            setTimeout(() => { if (progFill) progFill.style.width = '0%'; }, 1000);
+            // 500ms后移除进度条，防止卡住不消失
+            setTimeout(() => {
+                const wrap = document.getElementById('previewProgressBar');
+                const txt = document.getElementById('previewProgressText');
+                if (wrap) wrap.remove();
+                if (txt) txt.remove();
+            }, 500);
 
             const orderedResults = studentList.map(st => {
                 const found = results.find(r => r.studentId === st.id);
@@ -2107,48 +2199,8 @@
                 </div>`;
             }).join('');
 
-            // 事件委托：生成的卡片按钮（用容器的点击事件统一处理，避免逐个绑定）
-            container.addEventListener('click', function(e) {
-                const copyBtn = e.target.closest('.copy-single-btn');
-                if (copyBtn) {
-                    e.stopPropagation();
-                    const idx = parseInt(copyBtn.dataset.idx);
-                    const textarea = container.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
-                    const res = orderedResults[idx];
-                    if (textarea && res) {
-                        navigator.clipboard.writeText(textarea.value);
-                        showToast(`已复制 ${res.studentName}`);
-                    }
-                    return;
-                }
-                const saveBtn = e.target.closest('.save-single-btn');
-                if (saveBtn) {
-                    e.stopPropagation();
-                    const idx = parseInt(saveBtn.dataset.idx);
-                    const textarea = container.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
-                    const res = orderedResults[idx];
-                    if (!textarea || !res) return;
-                    const finalReview = textarea.value.trim();
-                    if (finalReview.includes('生成失败')) { showToast('课评无效', true); return; }
-                    const now = new Date();
-                    saveRecordToDB({
-                        id: genId(), studentId: res.studentId, studentName: res.studentName,
-                        classId: res.classId, classTopic: res.classTopic, classContent: res.classContent, reviewText: finalReview,
-                        recordDate: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
-                    }).catch(console.error).then(() => {
-                        showToast(`已保存 ${res.studentName}`);
-                        const card = container.querySelector(`.result-card[data-idx="${idx}"]`);
-                        if (card) card.remove();
-                        // 检查是否所有卡片都已保存，如果是则清空表单
-                        const remaining = container.querySelectorAll('.result-card').length;
-                        if (remaining <= 0) {
-                            const classContentInput = document.getElementById('classContentInput');
-                            if (classContentInput) classContentInput.value = '';
-                            document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
-                        }
-                    });
-                }
-            });
+            // 保存结果供委托事件使用（事件已统一绑定到容器，见 initMainSystem）
+            _genResults = orderedResults;
 
             setLoading(genBtn, false);
             showToast(`✅ 生成完成，共 ${orderedResults.length} 份课评`);
@@ -2157,13 +2209,20 @@
             const classContentInput = document.getElementById('classContentInput');
             if (classContentInput) classContentInput.value = '';
             document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+            selectedStudentIds.clear();
         }
 
         let _pendingRecordRefresh = false;
+        let _pendingStudentRefresh = false;
         // 判断用户当前是否正在输入（焦点在输入框/文本域/可编辑元素）
         function isUserTyping() {
             const a = document.activeElement;
             if (!a) return false;
+            // 勾选框/单选/按钮不属于文本输入，操作后应允许立即刷新
+            if (a.tagName === 'INPUT') {
+                const t = (a.type || '').toLowerCase();
+                if (t === 'checkbox' || t === 'radio' || t === 'button' || t === 'submit') return false;
+            }
             return a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable;
         }
         async function refreshRecordList() {
@@ -2276,7 +2335,7 @@
             const sel = document.getElementById('studentSelect');
             if (sel) {
                 if (!filtered.length) { sel.innerHTML = '<option value="">暂无学生</option>'; }
-                else { sel.innerHTML = '<option value="">请选择学生</option>' + filtered.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${getClassNameById(s.classId)})</option>`).join(''); }
+                else { sel.innerHTML = '<option value="">请选择学生</option>' + filtered.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${escapeHtml(getClassNameById(s.classId))})</option>`).join(''); }
             }
             if (filtered.length === 1 && sel) sel.value = filtered[0].id;
             renderBatchStudentList();
@@ -2468,28 +2527,8 @@
             });
             batchContainer.replaceChildren(...rendered);
 
-            // 批量结果复制按钮委托
-            batchContainer.addEventListener('click', function(e) {
-                const contentBtn = e.target.closest('.copyBatchContentBtn');
-                if (contentBtn) {
-                    e.stopPropagation();
-                    const result = results[Array.from(batchContainer.children).indexOf(contentBtn.closest('.batch-result'))];
-                    if (result && !result.error) {
-                        navigator.clipboard.writeText(result.contentSummaryHtml);
-                        showToast('已复制');
-                    }
-                    return;
-                }
-                const summaryBtn = e.target.closest('.copyBatchSummaryBtn');
-                if (summaryBtn) {
-                    e.stopPropagation();
-                    const result = results[Array.from(batchContainer.children).indexOf(summaryBtn.closest('.batch-result'))];
-                    if (result && !result.error) {
-                        navigator.clipboard.writeText(result.summary);
-                        showToast('已复制');
-                    }
-                }
-            });
+            // 保存结果供委托事件使用（事件已统一绑定到容器，见 initMainSystem）
+            _batchResults = results;
         }
         function bindMonthlyBatchEvents() {
             const btn = document.getElementById('batchGenerateSummariesBtn');
@@ -2516,56 +2555,482 @@
             if (nameSearch) nameSearch.addEventListener('input', debounce(refreshMonthlyStudentSelect, 300));
         }
 
-        async function exportData() {
-            const exportObj = { classes, students, records };
-            const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
+        // ── Excel / 备份辅助函数 ──
+        function _txt(v) { return v == null ? '' : String(v); }
+        function _clsNameOf(classId) {
+            const c = classId != null ? classMap.get(Number(classId)) : null;
+            return c ? _txt(c.name) : '';
+        }
+        function _stuNoOf(studentId) {
+            const s = studentId != null ? studentMap.get(Number(studentId)) : null;
+            return s ? _txt(s.stuId) : '';
+        }
+        function _fileStamp() {
+            const d = new Date();
+            const p = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+        }
+        function _downloadBlob(blob, filename) {
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `课评系统_${new Date().toISOString().slice(0,19)}.json`;
+            a.download = filename;
             a.click();
-            showToast('导出成功');
+            setTimeout(() => { try { URL.revokeObjectURL(a.href); } catch (_) {} }, 1000);
+        }
+        function _parseId(v) {
+            if (v == null) return null;
+            const s = String(v).trim();
+            if (!s) return null;
+            const n = Number(s);
+            return (isNaN(n) || n <= 0) ? null : n;
+        }
+        function _ymd(d) {
+            const p = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+        }
+        function _excelSerial(v) {
+            const epoch = Date.UTC(1899, 11, 30);
+            const d = new Date(epoch + Math.round(Number(v)) * 86400000);
+            return _ymd(d);
+        }
+        function _normDate(v) {
+            if (v == null) return '';
+            if (typeof v === 'object' && typeof v.getTime === 'function') {
+                const t = v.getTime();
+                if (isNaN(t)) return '';
+                const d = new Date(t);
+                const p = n => String(n).padStart(2, '0');
+                return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+            }
+            if (typeof v === 'number') return _excelSerial(v);
+            let s = String(v).trim();
+            if (!s) return '';
+            if (/^\d+(\.\d+)?$/.test(s)) return _excelSerial(parseFloat(s));
+            s = s.replace(/年|月/g, '-').replace(/日/g, '').replace(/\//g, '-').replace(/\./g, '-');
+            let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+            if (m) {
+                const time = m[4] != null ? ` ${String(m[4]).padStart(2, '0')}:${String(m[5]).padStart(2, '0')}:${m[6] != null ? String(m[6]).padStart(2, '0') : '00'}` : '';
+                return `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}${time}`;
+            }
+            m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+            if (m) {
+                const time = m[4] != null ? ` ${String(m[4]).padStart(2, '0')}:${String(m[5]).padStart(2, '0')}:${m[6] != null ? String(m[6]).padStart(2, '0') : '00'}` : '';
+                return `${m[3]}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}${time}`;
+            }
+            return s.slice(0, 19);
+        }
+        function _dateOnly(v) {
+            const s = _normDate(v);
+            return s ? s.slice(0, 10) : '';
+        }
+        function _readSheet(wb, names) {
+            for (const n of names) {
+                if (wb.Sheets[n]) return { name: n, rows: XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: '' }) };
+            }
+            return { name: null, rows: [] };
+        }
+
+        async function exportData() {
+            try {
+                const exportObj = {
+                    _format: 'keping-backup',
+                    _version: 1,
+                    _exportedAt: new Date().toISOString(),
+                    classes, students, records
+                };
+                const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
+                _downloadBlob(blob, `课评系统备份_${_fileStamp()}.json`);
+                showToast(`已导出 ${classes.length} 班级 / ${students.length} 学生 / ${records.length} 记录`);
+            } catch (err) {
+                showToast('导出失败：' + err.message, true);
+            }
         }
         async function importData(file) {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    if (data.classes) {
-                        classes = data.classes;
-                        for (let c of classes) await idbPut('classes', c);
-                    }
-                    if (data.students) {
-                        students = data.students;
-                        for (let s of students) await idbPut('students', s);
-                    }
-                    if (data.records) {
-                        records = data.records;
-                        for (let r of records) await idbPut('records', r);
-                    }
-                    _cacheTs.classes = _cacheTs.students = _cacheTs.records = Date.now();
-                    refreshClassMap();
-                    await refreshAllData();
-                    showToast('导入成功');
-                } catch (err) {
-                    showToast('文件错误', true);
+            if (!confirm('导入备份将用文件内容合并到现有数据（同名 ID 覆盖、新 ID 新增），不会删除现有其他数据。\n\n确定继续吗？')) return;
+            const btn = document.getElementById('importDataBtn');
+            try {
+                setLoading(btn, true);
+                const text = await file.text();
+                let data;
+                try { data = JSON.parse(text); }
+                catch (e) { showToast('文件不是有效的 JSON', true); return; }
+                if (!data || typeof data !== 'object') { showToast('备份文件格式不正确', true); return; }
+                const isArr = a => Array.isArray(a);
+                if (!isArr(data.classes) && !isArr(data.students) && !isArr(data.records)) {
+                    showToast('备份文件缺少 classes/students/records 数据', true); return;
                 }
-            };
-            reader.readAsText(file);
+                // 基础校验：过滤掉无 id 的脏数据，避免写入后无法同步
+                const pick = arr => (isArr(arr) ? arr.filter(x => x && typeof x === 'object' && x.id != null) : null);
+                const inCls = pick(data.classes), inStu = pick(data.students), inRec = pick(data.records);
+                const skipped = [data.classes, data.students, data.records]
+                    .reduce((n, a) => n + (isArr(a) ? a.length : 0), 0)
+                    - [inCls, inStu, inRec].reduce((n, a) => n + (a ? a.length : 0), 0);
+
+                const merge = async (table, incoming) => {
+                    if (!incoming) return 0;
+                    let n = 0;
+                    for (const item of incoming) {
+                        const id = Number(item.id);
+                        if (!id) continue;
+                        const cur = table === 'classes' ? classes : table === 'students' ? students : records;
+                        const idx = cur.findIndex(x => Number(x.id) === id);
+                        if (idx !== -1) cur[idx] = Object.assign({}, cur[idx], item);
+                        else cur.push(item);
+                        const target = cur[idx !== -1 ? idx : cur.length - 1];
+                        await idbPutPending(idx !== -1 ? 'update' : 'insert', table, target);
+                        n++;
+                    }
+                    return n;
+                };
+                const c1 = await merge('classes', inCls);
+                const c2 = await merge('students', inStu);
+                const c3 = await merge('records', inRec);
+                // 写入本地（单事务批量）。写内存全量，确保本地与内存一致、脏数据不入库
+                await idbPutMany('classes', classes).catch(e => console.warn('[导入] 班级写入本地失败', e));
+                await idbPutMany('students', students).catch(e => console.warn('[导入] 学生写入本地失败', e));
+                await idbPutMany('records', records).catch(e => console.warn('[导入] 记录写入本地失败', e));
+                // 关键修复：导入后必须推云端，否则切标签页触发同步时会被云端数据顶掉
+                await flushPendingToSupabase();
+
+                _cacheTs.classes = _cacheTs.students = _cacheTs.records = 0;
+                refreshClassMap(); refreshStudentMap(); refreshRecordMap();
+                renderAllByTab();
+                if (apiReady) await refreshAllData(true).catch(() => {});
+
+                let msg = `导入完成：班级 ${c1} / 学生 ${c2} / 课评记录 ${c3}`;
+                if (skipped > 0) msg += `\n\n⚠️ 已忽略 ${skipped} 条无 ID 的无效数据`;
+                alert(msg);
+            } catch (err) {
+                console.error('导入失败', err);
+                showToast('导入失败：' + err.message, true);
+            } finally {
+                setLoading(btn, false);
+            }
         }
+        // ───────────── 导出 Excel（三 sheet）─────────────
+        async function exportExcel() {
+            if (typeof XLSX === 'undefined') { showToast('Excel 组件未加载，请刷新页面重试', true); return; }
+            try {
+                const clsRows = classes.map(c => ({
+                    '班级ID': _txt(c.id),
+                    '班级名称': _txt(c.name)
+                }));
+                const stuRows = students.map(s => ({
+                    '学生ID': _txt(s.id),
+                    '学号': _txt(s.stuId),
+                    '姓名': _txt(s.name),
+                    '班级ID': _txt(s.classId),
+                    '班级名称': _clsNameOf(s.classId)
+                }));
+                const recRows = records.map(r => ({
+                    '记录ID': _txt(r.id),
+                    '学号': _stuNoOf(r.studentId),
+                    '学生姓名': _txt(r.studentName),
+                    '班级名称': _clsNameOf(r.classId),
+                    '课堂内容': _txt(r.classContent),
+                    '课题': _txt(r.classTopic),
+                    '课评内容': _txt(r.reviewText),
+                    '日期': (r.recorddate ? _normDate(r.recorddate) : ''),
+                    '操作': ''
+                }));
+                const wb = XLSX.utils.book_new();
+                const addSheet = (rows, name, widths, wrapCols) => {
+                    const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ '（空）': '' }]);
+                    const range = XLSX.utils.decode_range(ws['!ref']);
+                    // id 列设为文本格式，避免 13 位数字被 Excel 转成科学计数法
+                    for (let C = range.s.c; C <= range.e.c; C++) {
+                        const col = XLSX.utils.encode_col(C);
+                        for (let R = range.s.r; R <= range.e.r; R++) {
+                            const cell = ws[col + (R + 1)];
+                            if (cell && typeof cell.v === 'string' && /^\d{10,}$/.test(cell.v)) {
+                                cell.t = 's'; cell.z = '@';
+                            }
+                        }
+                    }
+                    if (widths) ws['!cols'] = widths.map(w => ({ wch: w }));
+                    wrapCols = wrapCols || [];
+                    if (wrapCols.length) {
+                        for (let R = range.s.r; R <= range.e.r; R++) {
+                            for (const C of wrapCols) {
+                                const cell = ws[XLSX.utils.encode_col(C) + (R + 1)];
+                                if (cell) cell.s = Object.assign(cell.s || {}, { alignment: { wrapText: true, vertical: 'top' } });
+                            }
+                        }
+                    }
+                    XLSX.utils.book_append_sheet(wb, ws, name);
+                };
+                addSheet(clsRows, '班级', [16, 22]);
+                addSheet(stuRows, '学生', [16, 22, 14, 14, 18]);
+                addSheet(recRows, '课评记录', [16, 22, 14, 18, 30, 22, 60, 12, 10], [6]);
+                const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+                _downloadBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+                    `课评系统_${_fileStamp()}.xlsx`);
+                showToast(`已导出 ${clsRows.length} 班级 / ${stuRows.length} 学生 / ${recRows.length} 记录`);
+            } catch (err) {
+                showToast('导出失败：' + err.message, true);
+            }
+        }
+
+        // ───────────── 导入 Excel ─────────────
+        async function importExcel(file) {
+            if (typeof XLSX === 'undefined') { showToast('Excel 组件未加载，请刷新页面重试', true); return; }
+            if (!confirm(
+                '导入 Excel 说明：\n\n' +
+                '· 按「ID → 学号 → 姓名+班级」的顺序匹配现有数据，命中则更新，否则新增\n' +
+                '· 「操作」列填「删除」的行会被删除\n' +
+                '· 未出现在 Excel 中的现有数据保持不变（不会删除）\n' +
+                '· 导入结果会直接同步到云端\n\n' +
+                '确定继续吗？')) return;
+
+            const btn = document.getElementById('importExcelBtn');
+            const stat = {
+                classes: { add: 0, upd: 0, del: 0 },
+                students: { add: 0, upd: 0, del: 0 },
+                records: { add: 0, upd: 0, del: 0 }
+            };
+            const errors = [];
+            try {
+                setLoading(btn, true);
+                const buf = await file.arrayBuffer();
+                const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+                const shCls = _readSheet(wb, ['班级']);
+                const shStu = _readSheet(wb, ['学生']);
+                const shRec = _readSheet(wb, ['课评记录', '记录']);
+                if (!shCls.name && !shStu.name && !shRec.name) {
+                    showToast('未识别到工作表，需包含「班级」「学生」「课评记录」之一', true);
+                    return;
+                }
+
+                // ── 阶段 1：班级 ──
+                for (const row of shCls.rows) {
+                    const name = _txt(row['班级名称']).trim();
+                    const op = _txt(row['操作']).trim();
+                    if (!name) { if (op) errors.push(`班级 第${row.__row}行：班级名称为空`); continue; }
+                    const id = _parseId(row['班级ID']);
+                    let cur = id ? classes.find(c => Number(c.id) === id) : null;
+                    if (!cur) cur = classes.find(c => _txt(c.name).trim() === name);
+                    if (op === '删除') {
+                        if (cur) { await deleteClassById(cur.id); stat.classes.del++; }
+                        continue;
+                    }
+                    if (cur) {
+                        if (_txt(cur.name).trim() !== name) {
+                            cur.name = name;
+                            await idbPut('classes', cur);
+                            await idbPutPending('update', 'classes', cur);
+                            stat.classes.upd++;
+                        }
+                    } else {
+                        const nc = { id: genId(), name };
+                        classes.push(nc);
+                        await idbPut('classes', nc);
+                        await idbPutPending('insert', 'classes', nc);
+                        stat.classes.add++;
+                    }
+                }
+                refreshClassMap();
+
+                // ── 阶段 2：学生 ──
+                const clsByName = new Map(classes.map(c => [_txt(c.name).trim(), c]));
+                for (const row of shStu.rows) {
+                    const name = _txt(row['姓名']).trim();
+                    const op = _txt(row['操作']).trim();
+                    if (!name) { if (op) errors.push(`学生 第${row.__row}行：姓名为空`); continue; }
+                    let classId = _parseId(row['班级ID']);
+                    if (!classId) {
+                        const cn = _txt(row['班级名称']).trim();
+                        if (cn) {
+                            const c = clsByName.get(cn);
+                            if (c) classId = c.id;
+                            else { errors.push(`学生 第${row.__row}行：班级「${cn}」不存在，已跳过`); continue; }
+                        }
+                    }
+                    if (!classId) { errors.push(`学生 第${row.__row}行：未指定班级，已跳过`); continue; }
+
+                    const id = _parseId(row['学生ID']);
+                    const stuNo = _txt(row['学号']).trim();
+                    let cur = id ? students.find(s => Number(s.id) === id) : null;
+                    if (!cur && stuNo) cur = students.find(s => _txt(s.stuId).trim() === stuNo);
+                    if (!cur) cur = students.find(s => _txt(s.name).trim() === name && Number(s.classId) === Number(classId));
+
+                    if (op === '删除') {
+                        if (cur) { await deleteStudentById(cur.id); stat.students.del++; }
+                        continue;
+                    }
+                    if (cur) {
+                        let changed = false;
+                        if (_txt(cur.name).trim() !== name) { cur.name = name; changed = true; }
+                        if (Number(cur.classId) !== Number(classId)) { cur.classId = Number(classId); changed = true; }
+                        if (stuNo && _txt(cur.stuId).trim() !== stuNo) { cur.stuId = stuNo; changed = true; }
+                        if (changed) {
+                            await idbPut('students', cur);
+                            await idbPutPending('update', 'students', cur);
+                            stat.students.upd++;
+                            for (const r of records) {
+                                if (Number(r.studentId) === Number(cur.id)) {
+                                    r.studentName = cur.name;
+                                    r.classId = Number(cur.classId);
+                                    await idbPut('records', r);
+                                    await idbPutPending('update', 'records', r);
+                                }
+                            }
+                        }
+                    } else {
+                        const ns = { id: genId(), stuId: stuNo || generateStuId(), name, classId: Number(classId) };
+                        students.push(ns);
+                        await idbPut('students', ns);
+                        await idbPutPending('insert', 'students', ns);
+                        stat.students.add++;
+                    }
+                }
+                refreshStudentMap();
+                refreshClassMap();
+
+                // ── 阶段 3：课评记录 ──
+                const stuById = new Map(students.map(s => [Number(s.id), s]));
+                const stuByNo = new Map();
+                for (const s of students) {
+                    const no = _txt(s.stuId).trim();
+                    if (no && !stuByNo.has(no)) stuByNo.set(no, s);
+                }
+                for (const row of shRec.rows) {
+                    const date = _normDate(row['日期']);
+                    const content = _txt(row['课堂内容']).trim();
+                    const review = _txt(row['课评内容']).trim();
+                    const op = _txt(row['操作']).trim();
+                    if (!review && !content) { if (op) errors.push(`课评记录 第${row.__row}行：内容为空`); continue; }
+
+                    let stu = null;
+                    const stuNo = _txt(row['学号']).trim();
+                    const stuName = _txt(row['学生姓名']).trim();
+                    if (stuNo) {
+                        stu = stuByNo.get(stuNo);
+                        if (!stu) { errors.push(`课评记录 第${row.__row}行：学号「${stuNo}」不存在，已跳过`); continue; }
+                    } else if (stuName) {
+                        const hits = students.filter(s => _txt(s.name).trim() === stuName);
+                        if (hits.length === 1) stu = hits[0];
+                        else if (hits.length > 1) { errors.push(`课评记录 第${row.__row}行：学生「${stuName}」重名（${hits.length}人），请用学号定位，已跳过`); continue; }
+                        else { errors.push(`课评记录 第${row.__row}行：学生「${stuName}」不存在，已跳过`); continue; }
+                    }
+                    const rid = _parseId(row['记录ID']);
+                    let cur = rid ? records.find(r => Number(r.id) === rid) : null;
+                    if (cur) {
+                        stu = stuById.get(Number(cur.studentId)) || stu;
+                    } else if (stu) {
+                        cur = records.find(r => Number(r.studentId) === Number(stu.id)
+                            && _dateOnly(r.recorddate) === _dateOnly(date)
+                            && _txt(r.classContent).trim() === content);
+                    }
+
+                    if (op === '删除') {
+                        if (cur) { await deleteRecordById(cur.id); stat.records.del++; }
+                        continue;
+                    }
+                    if (!stu && cur) stu = stuById.get(Number(cur.studentId)) || null;
+                    if (!stu) { errors.push(`课评记录 第${row.__row}行：无法定位学生（学号/姓名均无效），已跳过`); continue; }
+
+                    if (cur) {
+                        let changed = false;
+                        const nextReview = review || _txt(cur.reviewText);
+                        if (_txt(cur.reviewText).trim() !== nextReview) { cur.reviewText = nextReview; changed = true; }
+                        if (content && _txt(cur.classContent).trim() !== content) { cur.classContent = content; changed = true; }
+                        const topic = _txt(row['课题']).trim();
+                        if (topic && _txt(cur.classTopic).trim() !== topic) { cur.classTopic = topic; changed = true; }
+                        if (date && _dateOnly(cur.recorddate) !== _dateOnly(date)) { cur.recorddate = date; changed = true; }
+                        if (stu && (Number(cur.studentId) !== Number(stu.id) || _txt(cur.studentName).trim() !== _txt(stu.name).trim())) {
+                            cur.studentId = Number(stu.id);
+                            cur.studentName = stu.name;
+                            cur.classId = Number(stu.classId);
+                            changed = true;
+                        }
+                        if (changed) {
+                            await idbPut('records', cur);
+                            await idbPutPending('update', 'records', cur);
+                            stat.records.upd++;
+                        }
+                    } else {
+                        const nr = {
+                            id: rid || genId(),
+                            studentId: Number(stu.id),
+                            studentName: _txt(stu.name),
+                            classId: Number(stu.classId),
+                            classContent: content,
+                            classTopic: _txt(row['课题']).trim(),
+                            reviewText: review,
+                            recorddate: date || _ymd(new Date())
+                        };
+                        records.push(nr);
+                        await idbPut('records', nr);
+                        await idbPutPending('insert', 'records', nr);
+                        stat.records.add++;
+                    }
+                }
+                refreshRecordMap();
+
+                // ── 阶段 4：统一推云端（所有 insert/update/delete 已入 pending 队列，flush 失败也不丢）──
+                await flushPendingToSupabase();
+                const pendingLeft = (await idbGetPending()).length;
+
+                _cacheTs.classes = _cacheTs.students = _cacheTs.records = 0;
+                refreshClassMap(); refreshStudentMap(); refreshRecordMap();
+                renderAllByTab();
+                if (apiReady) await refreshAllData(true).catch(() => {});
+
+                const sum = (k, label) => `${label} 新增${stat[k].add} 更新${stat[k].upd} 删除${stat[k].del}`;
+                let msg = `导入完成\n\n${sum('classes', '班级')}\n${sum('students', '学生')}\n${sum('records', '课评记录')}`;
+                msg += `\n\n云端同步：${pendingLeft ? pendingLeft + ' 条待同步（稍后自动重试）' : '已完成'}`;
+                if (errors.length) msg += `\n\n⚠️ 跳过 ${errors.length} 行：\n` + errors.slice(0, 12).join('\n') + (errors.length > 12 ? `\n…等共 ${errors.length} 条` : '');
+                alert(msg);
+            } catch (err) {
+                console.error('导入 Excel 失败', err);
+                showToast('导入失败：' + err.message, true);
+            } finally {
+                setLoading(btn, false);
+            }
+        }
+
         async function clearAllData() {
-            if (confirm('清空所有数据不可恢复！')) {
+            const total = classes.length + students.length + records.length;
+            if (!confirm(`清空所有数据不可恢复！\n\n当前共有 ${classes.length} 个班级 / ${students.length} 名学生 / ${records.length} 条课评记录。\n\n将同时删除云端数据，确定继续吗？`)) return;
+            const btn = document.getElementById('clearAllDataBtn');
+            try {
+                setLoading(btn, true);
+                // 关键：先记下所有 id，用于删除云端数据。
+                // 旧实现直接 idbClear('pending') 且不请求云端，导致切标签页触发同步后数据全部复活。
+                const delIds = {
+                    records: records.map(r => r.id).filter(v => v != null),
+                    students: students.map(s => s.id).filter(v => v != null),
+                    classes: classes.map(c => c.id).filter(v => v != null)
+                };
                 // 本地立即清空
-                classes = [];
-                students = [];
+                classes = []; students = [];
                 records = [];
                 _cacheTs.classes = _cacheTs.students = _cacheTs.records = 0;
-                await idbClear('classes');
-                await idbClear('students');
-                await idbClear('records');
-                await idbClear('pending');
-                refreshClassMap();
+                await idbClear('classes'); await idbClear('students'); await idbClear('records');
+                refreshClassMap(); refreshStudentMap(); refreshRecordMap();
                 renderAllByTab();
-                showToast('已清空');
+                // 云端删除：逐表批量删，失败则把待删 id 入 pending 兜底（确保最终一致）
+                let cloudOk = true;
+                for (const table of ['classes', 'students', 'records']) {
+                    const ids = delIds[table];
+                    if (!ids.length) continue;
+                    try {
+                        if (apiReady) await api.removeMany(table, ids);
+                        else for (const id of ids) await idbPutPending('delete', table, { id });
+                    } catch (e) {
+                        cloudOk = false;
+                        for (const id of ids) await idbPutPending('delete', table, { id });
+                    }
+                }
+                if (cloudOk && apiReady) await idbClearPending().catch(() => {});
+                else if (!cloudOk) showToast('部分云端删除失败，已加入待同步队列', true);
+                if (apiReady) await refreshAllData(true).catch(() => {});
+                showToast('已清空' + (apiReady ? '（含云端）' : '（本地，待联网后同步云端）'));
+            } catch (err) {
+                console.error('清空失败', err);
+                showToast('清空失败：' + err.message, true);
+            } finally {
+                setLoading(btn, false);
             }
         }
 
@@ -2675,6 +3140,8 @@
                             individualPerfArea.innerHTML = '';
                             individualPerfArea.style.display = 'none';
                         }
+                        document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+                        selectedStudentIds.clear();
                     }
 
                     renderAllByTab();
@@ -2687,6 +3154,10 @@
                 if (_pendingRecordRefresh && !isUserTyping()) {
                     _pendingRecordRefresh = false;
                     setTimeout(() => { if (currentTab === 'record') refreshRecordList(); }, 400);
+                }
+                if (_pendingStudentRefresh && !isUserTyping() && currentTab === 'record') {
+                    _pendingStudentRefresh = false;
+                    setTimeout(() => { if (currentTab === 'record') refreshStudentSelectors(); }, 400);
                 }
             });
 
@@ -2778,9 +3249,85 @@
                         const id = parseInt(e.target.value);
                         if (e.target.checked) selectedStudentIds.add(id);
                         else selectedStudentIds.delete(id);
+                        // 同步刷新"单独表现"输入区（只保留已勾选学生）
+                        refreshStudentSelectors();
                     }
                 });
                 checklistEl.dataset.bound = '1';
+            }
+            // 生成结果卡片按钮委托（只绑一次，避免每次生成重复叠加监听器）
+            const genContainer = document.getElementById('generatedPreviews');
+            if (genContainer && !genContainer.dataset.bound) {
+                genContainer.addEventListener('click', function(e) {
+                    const copyBtn = e.target.closest('.copy-single-btn');
+                    if (copyBtn) {
+                        e.stopPropagation();
+                        const idx = parseInt(copyBtn.dataset.idx);
+                        const textarea = genContainer.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
+                        const res = _genResults[idx];
+                        if (textarea && res) {
+                            navigator.clipboard.writeText(textarea.value);
+                            showToast(`已复制 ${res.studentName}`);
+                        }
+                        return;
+                    }
+                    const saveBtn = e.target.closest('.save-single-btn');
+                    if (saveBtn) {
+                        e.stopPropagation();
+                        const idx = parseInt(saveBtn.dataset.idx);
+                        const textarea = genContainer.querySelector(`.result-card[data-idx="${idx}"] .gen-card-content`);
+                        const res = _genResults[idx];
+                        if (!textarea || !res) return;
+                        const finalReview = textarea.value.trim();
+                        if (finalReview.includes('生成失败')) { showToast('课评无效', true); return; }
+                        const now = new Date();
+                        saveRecordToDB({
+                            id: genId(), studentId: res.studentId, studentName: res.studentName,
+                            classId: res.classId, classTopic: res.classTopic, classContent: res.classContent, reviewText: finalReview,
+                            recordDate: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
+                        }).then(() => {
+                            showToast(`已保存 ${res.studentName}`);
+                            const card = genContainer.querySelector(`.result-card[data-idx="${idx}"]`);
+                            if (card) card.remove();
+                            const remaining = genContainer.querySelectorAll('.result-card').length;
+                            if (remaining <= 0) {
+                                const classContentInput = document.getElementById('classContentInput');
+                                if (classContentInput) classContentInput.value = '';
+                                document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+                                selectedStudentIds.clear();
+                            }
+                        }).catch(() => {
+                            showToast('保存失败，请重试', true);
+                        });
+                    }
+                });
+                genContainer.dataset.bound = '1';
+            }
+            // 批量结果卡片按钮委托（只绑一次）
+            const batchContainer = document.getElementById('batchResultsContainer');
+            if (batchContainer && !batchContainer.dataset.bound) {
+                batchContainer.addEventListener('click', function(e) {
+                    const contentBtn = e.target.closest('.copyBatchContentBtn');
+                    if (contentBtn) {
+                        e.stopPropagation();
+                        const result = _batchResults[Array.from(batchContainer.children).indexOf(contentBtn.closest('.batch-result'))];
+                        if (result && !result.error) {
+                            navigator.clipboard.writeText(result.contentSummaryHtml);
+                            showToast('已复制');
+                        }
+                        return;
+                    }
+                    const summaryBtn = e.target.closest('.copyBatchSummaryBtn');
+                    if (summaryBtn) {
+                        e.stopPropagation();
+                        const result = _batchResults[Array.from(batchContainer.children).indexOf(summaryBtn.closest('.batch-result'))];
+                        if (result && !result.error) {
+                            navigator.clipboard.writeText(result.summary);
+                            showToast('已复制');
+                        }
+                    }
+                });
+                batchContainer.dataset.bound = '1';
             }
             document.getElementById('toggleIndividualBtn').addEventListener('click', () => {
                 const area = document.getElementById('individualPerfArea');
@@ -2820,7 +3367,7 @@
             document.getElementById('addRecordBtn').addEventListener('click', () => {
                 const modalSel = document.getElementById('modalStudentSelect');
                 if (modalSel && students.length) {
-                    modalSel.innerHTML = '<option value="">请选择学生</option>' + students.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}" data-class="${s.classId}">${escapeHtml(s.name)} (${getClassNameById(s.classId)})</option>`).join('');
+                    modalSel.innerHTML = '<option value="">请选择学生</option>' + students.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}" data-class="${s.classId}">${escapeHtml(s.name)} (${escapeHtml(getClassNameById(s.classId))})</option>`).join('');
                 }
                 document.getElementById('modalClassTopic').value = '';
                 document.getElementById('modalClassContent').value = '';
@@ -2870,6 +3417,14 @@
             document.getElementById('addClassBtn').addEventListener('click', async () => {
                 const newName = prompt('班级名称');
                 if (newName) await addOrUpdateClass(null, newName.trim());
+            });
+            document.getElementById('exportExcelBtn').addEventListener('click', exportExcel);
+            document.getElementById('importExcelBtn').addEventListener('click', () => {
+                const inp = document.createElement('input');
+                inp.type = 'file';
+                inp.accept = '.xlsx,.xls';
+                inp.onchange = e => { if (e.target.files[0]) importExcel(e.target.files[0]); };
+                inp.click();
             });
             document.getElementById('exportDataBtn').addEventListener('click', exportData);
             document.getElementById('importDataBtn').addEventListener('click', () => {
@@ -2968,7 +3523,7 @@
             // Ctrl+G - 生成课评预览
             if (e.ctrlKey && e.key === 'g') {
                 e.preventDefault();
-                if (currentTab === 'preview') generatePreviews();
+                if (currentTab === 'record') generatePreviews();
                 else showToast('请先切换到"生成课评"标签', true);
             }
             // Ctrl+B - 批量生成月度总结

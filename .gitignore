@@ -16,3 +16,9 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# ===== 本地备份文件 =====
+# public/ 会被整体部署到 Cloudflare Pages，备份文件一旦提交就等于公开源码
+*.bak
+*.bak_*
+public/*.bak*
