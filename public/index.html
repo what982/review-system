@@ -2094,25 +2094,28 @@
                 // 已生成的评语摘要，用于差异化提示（过滤失败条目，避免污染后续提示）
                 const validPrev = prevReviews.filter(r => r.reviewText && !r.reviewText.includes('生成失败'));
                 const prevContext = validPrev.length > 0
-                    ? `\n\n【其他同学已生成的评语参考，请确保你的评语在句式、切入点、结尾建议上都与此有明显区别】\n${validPrev.map(r => `${r.studentName}：${r.reviewText.slice(0, 90)}...`).join('\n')}`
+                    ? `\n\n【以下为已生成同学的评语，请让所生成的评语在切入点、具体事例、用词和句式结构上都与之明显不同，不要复用"积极发言""思维活跃"等相同表扬词，也不要用相同开头】\n${validPrev.map(r => `${r.studentName}：${r.reviewText.slice(0, 90)}...`).join('\n')}`
                     : '';
 
-                const prompt = `请为"${student.name}"同学写一段课后评语：
+                const prompt = `请为"${student.name}"同学撰写一段课后评语。要求像一位细致、真诚的老师在跟家长交流：自然、具体、不套话。
 
-1. 开头以"${student.name}本节课……"开始，围绕课堂内容"${classContent}"展开
-2. 严格控制在${targetWords}字左右（正负不超过3字）
-3. 风格：口语化，自然真实，像老师随口聊
-4. 本班整体表现（全班共有的情况，作为背景铺垫）："${student.generalPerf || '未填写，可不体现'}"
-5. 该生特别表现（只属于该生的情况，必须重点体现）："${student.perf || '未填写，请结合该生情况合理发挥'}"，从该生具体表现切入，不要泛泛而谈，也不要只复述班级共性
-6. 全文不能出现"你""她""他"字，直接用名字或"该生"
-7. 多加合适的表情符号（如😊或👍）
-8. 确保评语针对本节课"${classContent}"专属评价
-9. 每位学生的评语侧重点必须不同：有的突出课堂互动，有的突出知识掌握，有的突出进步建议，避免千篇一律
-10. 严禁出现"今天学习了什么"这类总结式表述，也严禁出现"主题"二字（不要写"本节课的主题是……""本堂课的主题是……"等）
-11. 写成连贯的一段口语化评语，不要用标题、分点、冒号列举等格式化写法
-12. 评语要突出该生独特的表现特点${prevContext}
+基本信息：
+- 课堂内容：${classContent}
+- 全班整体表现（作背景铺垫）：${student.generalPerf || '未填写，可不体现'}
+- 该生本节课的个性表现（须重点体现）：${student.perf || '未填写，请结合该生情况合理发挥'}
 
-直接输出评语文本，不加任何解释。`;
+撰写要求：
+1. 字数控制在${targetWords}字左右（允许±5字）。
+2. 以该生为叙述对象，用"该生"或直呼其名，避免出现"你""她""他"字造成指代不清。
+3. 开头自然切入，可从不同角度起笔（如"今天${student.name}…""${student.name}这堂课…""课上观察到${student.name}…""${student.name}在…环节…"），不要每篇都用同一种开头。
+4. 先写一条具体、可观察的表现（结合上方"该生个性表现"；若未提供，则基于课堂内容给一条合理且具体的观察，严禁写"表现优秀""态度端正""积极活跃"等空话）。
+5. 肯定具体表现后，给一条简短、可落地的改进或巩固建议（如"下次可尝试独立调试这道题"），避免"继续加油"类套话。
+6. 评语须紧扣本节课"${classContent}"，不要写成泛泛的学期总结；严禁"今天学习了什么"式表述，严禁出现"主题"二字。
+7. 适当加入表情符号（如😊👍✨），让评语更亲切自然，每条至少加 1 个。
+8. 与已生成同学的评语（见下）在切入点、用词、句式结构上都明显错开，避免雷同。
+9. 突出该生独特之处${prevContext}
+
+直接输出评语正文，不要解释、不要加引号。`;
 
                 for (let attempt = 0; attempt <= maxRetries; attempt++) {
                     try {
@@ -2125,7 +2128,6 @@
                         const data = await res.json();
                         let review = data.choices?.[0]?.message?.content?.trim() || '生成失败';
                         review = review.replace(/[你她他]/g, student.name);
-                        if (!review.startsWith(student.name)) review = student.name + '本节课' + review.replace(/^[^，。,.]*[，。,.]?\s*/, '');
                         const charCount = countChineseChars(review);
                         if (Math.abs(charCount - targetWords) <= 5 || attempt === maxRetries) {
                             return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: review, charCount };
