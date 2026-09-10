@@ -951,9 +951,9 @@
                     <div class="range-wrap" style="margin-bottom:16px;">
                         <div class="range-header">
                             <label style="margin:0;">🎯 目标字数/生</label>
-                            <span id="wordCountValue" class="range-value">150</span>
+                            <span id="wordCountValue" class="range-value">120</span>
                         </div>
-                        <input type="range" id="wordSlider" min="60" max="300" value="150" step="5">
+                        <input type="range" id="wordSlider" min="60" max="300" value="120" step="5">
                     </div>
                     <div class="toolbar">
                         <div class="form-group"><label>班级筛选</label><select id="classFilterSelectGen"></select></div>
@@ -2099,6 +2099,8 @@
 
                 const perfText = (student.perf || '').trim() || '（老师未填写，无内容）';
                 const hasPerf = perfText !== '（老师未填写，无内容）';
+                // 字数容差取目标字数的10%（最少5字），短评语与长评语都留足可达空间
+                const tolerance = Math.max(5, Math.round(targetWords * 0.1));
                 const prompt = `请为"${student.name}"同学撰写一段课后评语。这段话会单独发给${student.name}的家长，请像一位细致、真诚的老师在微信里跟家长聊孩子这堂课的表现：自然、具体、有温度。
 
 基本信息：
@@ -2107,9 +2109,9 @@
 - 全班本节课的整体状态（仅供你理解课堂背景，严禁写进评语正文）：${student.generalPerf || '（未填写）'}
 
 撰写要求：
-1. 字数控制在${targetWords}字左右（允许±5字）。
+1. 【字数 · 硬指标】正文的汉字数必须落在 ${targetWords - tolerance}~${targetWords + tolerance} 字之间（只数汉字，标点与表情不计）。这是硬性要求，写完后请自行核对一遍再输出。
 2. 【单独发给家长】只写${student.name}一个人的情况。严禁出现"全班""其他同学""大部分同学""相比之下"等涉及班级或他人的表述——家长只会看到自己孩子这一段。
-3. 【称呼】用"${student.name}同学"或直接称呼"${student.name}"，也可说"您家${student.name}"。严禁使用"该生"这类教务公文用语，也不要用"她/他"造成指代不清。
+3. 【开头与称呼】第一句直接以"${student.name}"起句，例如"${student.name}这堂课…""${student.name}今天…"，不要加"家长您好"之类的寒暄。全文只用姓名，严禁出现"您家${student.name}""该生"这类称呼，也不要用"她/他"造成指代不清。
 4. 【写表现，不写成果】评价对象是孩子这堂课的表现与状态——专注度、投入程度、思考与提问、遇到卡点时的应对、与老师同学的互动、学习习惯等。严禁"完成了XX""做出了XX""任务全部做完"这类成果式表述；课堂内容仅作为场景自然带过。
 5. 【严禁编造 · 最重要】评语中的具体表现、事例、动作、对话，只能来自上方"老师记录的表现"中老师已经写明的内容，一字一句都不得自行想象、推测或补充。尤其不得写"比上次进步了""比之前好"这类历史对比——你没有往期数据。
 6. 【结构：先总后分】${hasPerf ? `先用一两句话给出${student.name}这堂课的整体评价（整体状态、投入程度、学习态度等），再用一两句话落到具体表现上；整体在前，具体在后，不要通篇笼统。` : `整段围绕${student.name}这堂课的整体状态来写（投入程度、学习态度、互动参与等），语句连贯平实即可，切勿为凑字数虚构细节。`}
@@ -2123,21 +2125,30 @@
 
 直接输出评语正文，不要解释、不要加引号、不要加"家长您好"等称呼开头。`;
 
+                let lastCount = 0;
                 for (let attempt = 0; attempt <= maxRetries; attempt++) {
                     try {
+                        // 第二次起带上一次的真实字数反馈，让模型知道该增还是该减
+                        const lengthHint = attempt === 0 ? '' : `\n\n【字数校正 · 必读】上一次你实际写了 ${lastCount} 个汉字，目标是 ${targetWords} 字（合格区间 ${targetWords - tolerance}~${targetWords + tolerance} 字）。${lastCount < targetWords - tolerance ? `偏短约 ${targetWords - lastCount} 字，请在保持原意的基础上补充真实内容` : `偏长约 ${lastCount - targetWords} 字，请在不丢关键信息的前提下删减`}，务必让本次汉字数落在 ${targetWords - tolerance}~${targetWords + tolerance} 字。`;
+                        // 重试时略降温度，减少长度波动，帮助字数收敛
+                        const attemptTemp = Math.max(0.5, temperature - attempt * 0.15);
                         const res = await fetch(apiConfig.endpoint, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.apiKey}` },
-                            body: JSON.stringify({ model: apiConfig.modelId, messages: [{ role: 'user', content: prompt }], max_tokens: Math.min(600, targetWords * 2 + 80), temperature, top_p: 0.92 })
+                            body: JSON.stringify({ model: apiConfig.modelId, messages: [{ role: 'user', content: prompt + lengthHint }], max_tokens: targetWords * 3 + 200, temperature: attemptTemp, top_p: 0.92 })
                         });
                         if (!res.ok) throw new Error(`API请求失败(${res.status})`);
                         const data = await res.json();
-                        let review = data.choices?.[0]?.message?.content?.trim() || '生成失败';
+                        const choice = data.choices?.[0];
+                        let review = choice?.message?.content?.trim() || '生成失败';
                         review = review.replace(/[你她他]/g, student.name);
                         const charCount = countChineseChars(review);
-                        if (Math.abs(charCount - targetWords) <= 5 || attempt === maxRetries) {
+                        // finish_reason 为 length 说明被 token 上限截断，内容残缺，不能采用
+                        const truncated = choice?.finish_reason === 'length';
+                        if (!truncated && (Math.abs(charCount - targetWords) <= tolerance || attempt === maxRetries)) {
                             return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: review, charCount };
                         }
+                        lastCount = charCount;
                     } catch (err) {
                         if (attempt === maxRetries) return { studentId: student.id, studentName: student.name, classId: student.classId, classContent, reviewText: `生成失败: ${err.message}`, charCount: 0 };
                     }
