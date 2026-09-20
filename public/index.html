@@ -2088,7 +2088,7 @@
             const progressSpan = document.getElementById('previewProgressText');
             if (progFill) progFill.style.width = '10%';
 
-            async function fetchReview(student, maxRetries = 2) {
+            async function fetchReview(student, maxRetries = 2, batchIndex = 0) {
                 const temperature = 0.7 + Math.random() * 0.4;
 
 
@@ -2097,6 +2097,18 @@
                 const hasPerf = perfText !== '（老师未填写，无内容）';
                 // 字数容差取目标字数的10%（最少5字），短评语与长评语都留足可达空间
                 const tolerance = Math.max(5, Math.round(targetWords * 0.1));
+                // —— 降重机制（方案A：不拼同班同学内容）——
+                // 1) 角度轮转：按批次序号 + 该生已有课评数确定性轮转「侧重维度」，
+                //    让同班不同学生、同一学生不同节课的落笔角度自然错开。
+                const ANGLES = ['课堂专注与听讲状态', '主动思考与提问', '动手实践与操作', '与老师同学的互动', '学习习惯与条理', '遇到困难时的应对'];
+                const existingReviewCount = (typeof records !== 'undefined' ? records : [])
+                    .filter(r => Number(r.studentId) === Number(student.id) && r.reviewText && !r.reviewText.includes('生成失败')).length;
+                const focusAngle = ANGLES[(batchIndex * 3 + existingReviewCount + (Number(student.id) || 0)) % ANGLES.length];
+                // 2) 该生往期课评（最近3条），仅用于跨课次降重，严禁参考同班同学内容
+                const historyReviews = (typeof records !== 'undefined' ? records : [])
+                    .filter(r => Number(r.studentId) === Number(student.id) && r.reviewText && !r.reviewText.includes('生成失败'))
+                    .slice(-3)
+                    .map(r => `（${(r.recorddate || '').slice(0, 10)}）${r.reviewText.slice(0, 80)}`).join('\n');
                 const prompt = `请为"${student.name}"同学撰写一段课后评语。这段话会单独发给${student.name}的家长，请像一位细致、真诚的老师在微信里跟家长聊孩子这堂课的表现：自然、具体、有温度。
 
 基本信息：
@@ -2115,8 +2127,9 @@
 8. 严禁"表现优秀""态度端正""积极活跃"等空话套话，严禁"继续加油"这类敷衍收尾。
 9. 严禁"今天学习了什么"式表述，严禁出现"主题"二字；也不要出现"本节课的教学目标""教学重点是"等教师视角的内部表述。
 10. 每条加入 1-2 个表情符号（如😊👍✨），让语气更亲切。
-11. 与本批已生成同学的评语在切入点、用词、句式结构上都明显错开，避免雷同。
+11. 本次撰写请适当侧重以下观察维度：「${focusAngle}」。这只是落笔侧重建议：仅当上方"老师记录的表现"确实涉及该维度时多着墨，未涉及的内容严禁强行编造。
 12. 突出${student.name}的独特之处。
+${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避免重复（严禁把它们当作本次表现来写）：\n${historyReviews}\n要求：不要与往期用相同的句式、相同的优点标签（如每节课都写"专注""积极"）、相同的收尾方式；要基于本次课堂内容写出这节课独有的观察角度与措辞。` : ''}
 
 直接输出评语正文，不要解释、不要加引号、不要加"家长您好"等称呼开头。`;
 
@@ -2155,9 +2168,10 @@
             let completed = 0;
 
             try {
-                // 顺序调用，每次传入已生成的结果作为上下文
-                for (const student of studentList) {
-                    const result = await fetchReview(student, 2);
+                // 顺序调用；传入批次序号 i 用于角度轮转（同班不同学生落笔角度错开）
+                for (let i = 0; i < studentList.length; i++) {
+                    const student = studentList[i];
+                    const result = await fetchReview(student, 2, i);
                     results.push(result);
                     completed++;
                     // 更新进度条
