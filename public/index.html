@@ -989,6 +989,7 @@
                     <div class="toolbar">
                         <div class="form-group"><label>班级</label><select id="recordClassFilter"></select></div>
                         <div class="form-group"><label>姓名</label><input type="text" id="recordNameSearch" placeholder="搜索学生"></div>
+                        <div class="form-group"><label>主题</label><input type="text" id="recordTopicSearch" placeholder="搜索主题"></div>
                         <div class="form-group"><label>开始日期</label><input type="date" id="recordDateFrom"></div>
                         <div class="form-group"><label>结束日期</label><input type="date" id="recordDateTo"></div>
                         <button id="searchRecordsBtn" class="btn-secondary">筛选</button>
@@ -1100,6 +1101,23 @@
         <div class="modal-footer">
             <button id="closeBatchEditBtn" class="btn-secondary">取消</button>
             <button id="confirmBatchEditBtn" class="btn-primary" style="width:auto;">确认修改</button>
+        </div>
+    </div>
+</div>
+
+<div id="recordEditModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header"><h3>✏️ 编辑课堂记录</h3></div>
+        <div class="modal-body">
+            <div class="form-group"><label>学生 / 班级</label><div id="editRecordStudent" style="padding:8px 10px;background:var(--bg);border-radius:8px;color:var(--text-muted);"></div></div>
+            <div class="form-group"><label>主题（可选）</label><input type="text" id="editRecordTopic" placeholder="如：循环结构"></div>
+            <div class="form-group"><label>课堂内容</label><textarea id="editRecordContent" rows="2"></textarea></div>
+            <div class="form-group"><label>课评内容</label><textarea id="editRecordReview" rows="4"></textarea></div>
+            <div class="form-group"><label>记录时间</label><input type="datetime-local" id="editRecordDate"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="closeEditRecordBtn" class="btn-secondary">取消</button>
+            <button id="confirmEditRecordBtn" class="btn-primary" style="width:auto;">保存修改</button>
         </div>
     </div>
 </div>
@@ -1809,7 +1827,9 @@
             const text = (raw || '').trim();
             let topic = '';
             let content = text;
-            const topicMatch = text.match(/《(.+?)》/);
+            let topicMatch = text.match(/《(.+?)》/);
+            let closeChar = '》';
+            if (!topicMatch) { topicMatch = text.match(/"([^"]+)"/); closeChar = '"'; } // 双引号也作为主题
             if (topicMatch) { topic = topicMatch[1].trim(); }
             const kwIdx = text.indexOf('知识点包括');
             if (kwIdx !== -1) {
@@ -1818,13 +1838,13 @@
                 content = after.replace(/^[\s：:]+/, '').trim();
                 // 若前面有《主题》，内容里不再保留《》部分之前的文字
                 if (topic) {
-                    const topicEnd = text.indexOf('》', topicMatch.index);
+                    const topicEnd = text.indexOf(closeChar, topicMatch.index);
                     const beforeKw = text.slice(topicEnd + 1, kwIdx).replace(/知识点包括/, '');
                     if (beforeKw.trim() === '') content = content; // 已在 after 中
                 }
             } else if (topic) {
                 // 有《主题》但无"知识点包括"，取《》之后的文字为内容
-                const topicEnd = text.indexOf('》', topicMatch.index);
+                const topicEnd = text.indexOf(closeChar, topicMatch.index);
                 content = text.slice(topicEnd + 1).trim();
             }
             if (!content) content = text; // 兜底
@@ -2253,11 +2273,16 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
             if (isUserTyping()) { _pendingRecordRefresh = true; return; }
             const classFilterVal = document.getElementById('recordClassFilter').value;
             const nameFilterVal = document.getElementById('recordNameSearch').value.trim().toLowerCase();
+            const topicFilterVal = document.getElementById('recordTopicSearch').value.trim().toLowerCase();
             const dateFrom = document.getElementById('recordDateFrom').value;
             const dateTo = document.getElementById('recordDateTo').value;
             let filtered = records.filter(r => {
                 if (classFilterVal && r.classId != classFilterVal) return false;
                 if (nameFilterVal && !r.studentName.toLowerCase().includes(nameFilterVal)) return false;
+                if (topicFilterVal) {
+                    const t = (r.classTopic || parseClassContent(r.classContent).classTopic || '').toLowerCase();
+                    if (!t.includes(topicFilterVal)) return false;
+                }
                 if (dateFrom && r.recorddate && r.recorddate.slice(0,10) < dateFrom) return false;
                 if (dateTo && r.recorddate && r.recorddate.slice(0,10) > dateTo) return false;
                 return true;
@@ -2279,7 +2304,7 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                 const dateValue = rec.recorddate ? rec.recorddate.replace(' ', 'T') : '';
                 const tr = document.createElement('tr');
                 tr.classList.add('record-table-card');
-                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent">${escapeHtml(rec.classContent)}</td><td class="editable-field" data-id="${rec.id}" data-field="reviewText">${escapeHtml(rec.reviewText)}</td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
+                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent">${escapeHtml(rec.classContent)}</td><td class="editable-field" data-id="${rec.id}" data-field="reviewText">${escapeHtml(rec.reviewText)}</td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm editRecordBtn" data-id="${rec.id}">✏️ 编辑</button> <button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
                 tbody.appendChild(tr);
             });
         }
@@ -2334,11 +2359,16 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
         async function batchDeleteFiltered() {
             const classFilterVal = document.getElementById('recordClassFilter').value;
             const nameFilterVal = document.getElementById('recordNameSearch').value.trim().toLowerCase();
+            const topicFilterVal = document.getElementById('recordTopicSearch').value.trim().toLowerCase();
             const dateFrom = document.getElementById('recordDateFrom').value;
             const dateTo = document.getElementById('recordDateTo').value;
             let filtered = records.filter(r => {
                 if (classFilterVal && r.classId != classFilterVal) return false;
                 if (nameFilterVal && !r.studentName.toLowerCase().includes(nameFilterVal)) return false;
+                if (topicFilterVal) {
+                    const t = (r.classTopic || parseClassContent(r.classContent).classTopic || '').toLowerCase();
+                    if (!t.includes(topicFilterVal)) return false;
+                }
                 if (dateFrom && r.recorddate && r.recorddate.slice(0,10) < dateFrom) return false;
                 if (dateTo && r.recorddate && r.recorddate.slice(0,10) > dateTo) return false;
                 return true;
@@ -2348,6 +2378,38 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                 await deleteRecordsBatch(filtered.map(r => r.id));
                 showToast(`已删除 ${filtered.length} 条记录`);
             }
+        }
+
+        // 编辑单条记录：弹出模态框，可改主题/课堂内容/课评/时间
+        function openEditModal(rid) {
+            const rec = recordMap.get(rid);
+            if (!rec) return;
+            document.getElementById('editRecordStudent').textContent = rec.studentName + '（' + getClassNameById(rec.classId) + '）';
+            document.getElementById('editRecordTopic').value = rec.classTopic || parseClassContent(rec.classContent).classTopic || '';
+            document.getElementById('editRecordContent').value = rec.classContent || '';
+            document.getElementById('editRecordReview').value = rec.reviewText || '';
+            document.getElementById('editRecordDate').value = rec.recorddate ? rec.recorddate.replace(' ', 'T').slice(0, 16) : '';
+            document.getElementById('recordEditModal').dataset.rid = rid;
+            document.getElementById('recordEditModal').classList.add('show');
+        }
+        async function confirmEditRecord() {
+            const modal = document.getElementById('recordEditModal');
+            const rid = parseInt(modal.dataset.rid);
+            const rec = recordMap.get(rid);
+            if (!rec) { modal.classList.remove('show'); return; }
+            const topic = document.getElementById('editRecordTopic').value.trim();
+            const content = document.getElementById('editRecordContent').value.trim();
+            const review = document.getElementById('editRecordReview').value.trim();
+            const dateVal = document.getElementById('editRecordDate').value;
+            if (!content) { showToast('课堂内容不能为空', true); return; }
+            if (!review) { showToast('课评内容不能为空', true); return; }
+            rec.classTopic = topic;
+            rec.classContent = content;
+            rec.reviewText = review;
+            if (dateVal) rec.recorddate = dateVal.replace('T', ' ') + ':00';
+            await saveRecordToDB(rec);
+            modal.classList.remove('show');
+            refreshRecordList();
         }
 
         async function refreshMonthlyStudentSelect() {
@@ -3116,29 +3178,25 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
             const recordTbody = document.getElementById('recordTbody');
             if (recordTbody) {
                 recordTbody.addEventListener('click', function(e) {
-                    const btn = e.target.closest('.saveRecordBtn, .delRecordBtn');
+                    const btn = e.target.closest('.saveRecordBtn, .delRecordBtn, .editRecordBtn');
                     if (btn) {
                         e.stopPropagation();
                         if (btn.classList.contains('saveRecordBtn')) {
                             const rid = parseInt(btn.dataset.id);
                             const rec = recordMap.get(rid);
                             if (!rec) return;
-                            // classContent/reviewText 直接用内存最新值（prompt 编辑已写回 rec），避免读取被截断的显示层
+                            // classContent/reviewText 直接用内存最新值（模态框编辑已写回 rec），避免读取被截断的显示层
                             rec.recorddate = document.querySelector(`.rec-date-edit[data-id="${rid}"]`).value.replace('T', ' ');
                             saveRecordToDB(rec).catch(console.error);
+                        } else if (btn.classList.contains('editRecordBtn')) {
+                            openEditModal(parseInt(btn.dataset.id));
                         } else {
                             if (confirm('删除该记录？')) deleteRecordById(parseInt(btn.dataset.id));
                         }
                     } else {
                         const field = e.target.closest('.editable-field');
                         if (!field) return;
-                        const rid = parseInt(field.dataset.id);
-                        const fname = field.dataset.field;
-                        const rec = recordMap.get(rid);
-                        if (rec) {
-                            const newVal = prompt(fname === 'classContent' ? '修改课堂内容' : '修改课评', rec[fname]);
-                            if (newVal && newVal.trim()) { rec[fname] = newVal.trim(); saveRecordToDB(rec).catch(console.error); }
-                        }
+                        openEditModal(parseInt(field.dataset.id));
                     }
                 });
                 recordTbody.addEventListener('change', function(e) {
@@ -3380,6 +3438,7 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
             document.getElementById('resetRecordsBtn').addEventListener('click', () => {
                 document.getElementById('recordClassFilter').value = '';
                 document.getElementById('recordNameSearch').value = '';
+                document.getElementById('recordTopicSearch').value = '';
                 document.getElementById('recordDateFrom').value = '';
                 document.getElementById('recordDateTo').value = '';
                 refreshRecordList();
@@ -3394,12 +3453,16 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
             document.getElementById('recordClassFilter').addEventListener('change', refreshRecordList);
             // 搜索防抖
             document.getElementById('recordNameSearch').addEventListener('input', debounce(refreshRecordList, 300));
+            document.getElementById('recordTopicSearch').addEventListener('input', debounce(refreshRecordList, 300));
             document.getElementById('recordDateFrom').addEventListener('change', refreshRecordList);
             document.getElementById('recordDateTo').addEventListener('change', refreshRecordList);
             document.getElementById('batchEditSelectedBtn').addEventListener('click', batchEditSelected);
             document.getElementById('confirmBatchEditBtn').addEventListener('click', confirmBatchEdit);
             document.getElementById('closeBatchEditBtn').addEventListener('click', () => document.getElementById('batchEditModal').classList.remove('show'));
             document.getElementById('batchDeleteFilteredBtn').addEventListener('click', batchDeleteFiltered);
+            // 单条记录编辑模态框
+            document.getElementById('closeEditRecordBtn').addEventListener('click', () => document.getElementById('recordEditModal').classList.remove('show'));
+            document.getElementById('confirmEditRecordBtn').addEventListener('click', confirmEditRecord);
 
             // 新增记录模态框
             document.getElementById('addRecordBtn').addEventListener('click', () => {
