@@ -249,15 +249,16 @@
             text-align: left;
             border-bottom: 1px solid var(--border);
         }
-        /* 课堂记录：长文本单元格固定可视区，超出内部上下滚动，不影响其它列 */
+        /* 课评记录表格：表头以下所有记录作为一个整体区域滚动，表头固定在顶部（不影响其它表格） */
+        .record-table-wrap {
+            max-height: clamp(320px, 60vh, 640px); /* 可视高度：随屏幕自适应，约 60vh */
+            overflow-y: auto;
+        }
         .record-table td.editable-field { vertical-align: top; }
-        .record-table .cell-scroll {
-            max-height: 120px;     /* 可视高度约 6 行，超出出现竖向滚动条 */
-            max-width: 280px;      /* 限宽，避免整张表被撑宽 */
-            overflow-y: auto;      /* 超出上下滚动 */
-            white-space: pre-wrap; /* 保留原换行 */
-            word-break: break-word;
-            line-height: 1.5;
+        .record-table thead th {
+            position: sticky;       /* 滚动时表头固定 */
+            top: 0;
+            z-index: 3;
         }
         th {
             background: #f8fafc;
@@ -1005,7 +1006,7 @@
                         <button id="searchRecordsBtn" class="btn-secondary">筛选</button>
                         <button id="resetRecordsBtn" class="btn-secondary">重置</button>
                     </div>
-                    <div class="table-wrap">
+                    <div class="table-wrap record-table-wrap">
                         <table class="record-table">
                             <thead><tr><th data-label="选择"><input type="checkbox" id="recordSelectAllCheckbox"></th><th data-label="学生">学生</th><th data-label="班级">班级</th><th data-label="主题">主题</th><th data-label="课堂内容">课堂内容</th><th data-label="课评">课评</th><th data-label="时间">时间</th><th data-label="操作">操作</th></tr></thead>
                             <tbody id="recordTbody"></tbody>
@@ -2316,7 +2317,7 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                 const dateValue = rec.recorddate ? rec.recorddate.replace(' ', 'T') : '';
                 const tr = document.createElement('tr');
                 tr.classList.add('record-table-card');
-                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent"><div class="cell-scroll">${escapeHtml(rec.classContent)}</div></td><td class="editable-field" data-id="${rec.id}" data-field="reviewText"><div class="cell-scroll">${escapeHtml(rec.reviewText)}</div></td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm editRecordBtn" data-id="${rec.id}">✏️ 编辑</button> <button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
+                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent">${escapeHtml(rec.classContent)}</td><td class="editable-field" data-id="${rec.id}" data-field="reviewText">${escapeHtml(rec.reviewText)}</td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm editRecordBtn" data-id="${rec.id}">✏️ 编辑</button> <button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
                 tbody.appendChild(tr);
             });
         }
