@@ -249,6 +249,16 @@
             text-align: left;
             border-bottom: 1px solid var(--border);
         }
+        /* 课堂记录：长文本单元格固定可视区，超出内部上下滚动，不影响其它列 */
+        .record-table td.editable-field { vertical-align: top; }
+        .record-table .cell-scroll {
+            max-height: 120px;     /* 可视高度约 6 行，超出出现竖向滚动条 */
+            max-width: 280px;      /* 限宽，避免整张表被撑宽 */
+            overflow-y: auto;      /* 超出上下滚动 */
+            white-space: pre-wrap; /* 保留原换行 */
+            word-break: break-word;
+            line-height: 1.5;
+        }
         th {
             background: #f8fafc;
             font-weight: 600;
@@ -1830,8 +1840,8 @@
             let topic = '';
             let content = text;
             let topicMatch = text.match(/《(.+?)》/);
-            let closeChar = '》';
-            if (!topicMatch) { topicMatch = text.match(/"([^"]+)"/); closeChar = '"'; } // 双引号也作为主题
+            if (!topicMatch) { topicMatch = text.match(/[“”]([^“”]+)[“”]/); } // 中文双引号""
+            if (!topicMatch) { topicMatch = text.match(/"([^"]+)"/); }          // 英文双引号""
             if (topicMatch) { topic = topicMatch[1].trim(); }
             const kwIdx = text.indexOf('知识点包括');
             if (kwIdx !== -1) {
@@ -1840,13 +1850,13 @@
                 content = after.replace(/^[\s：:]+/, '').trim();
                 // 若前面有《主题》，内容里不再保留《》部分之前的文字
                 if (topic) {
-                    const topicEnd = text.indexOf(closeChar, topicMatch.index);
+                    const topicEnd = topicMatch.index + topicMatch[0].length - 1;
                     const beforeKw = text.slice(topicEnd + 1, kwIdx).replace(/知识点包括/, '');
                     if (beforeKw.trim() === '') content = content; // 已在 after 中
                 }
             } else if (topic) {
                 // 有《主题》但无"知识点包括"，取《》之后的文字为内容
-                const topicEnd = text.indexOf(closeChar, topicMatch.index);
+                const topicEnd = topicMatch.index + topicMatch[0].length - 1;
                 content = text.slice(topicEnd + 1).trim();
             }
             if (!content) content = text; // 兜底
@@ -2306,7 +2316,7 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                 const dateValue = rec.recorddate ? rec.recorddate.replace(' ', 'T') : '';
                 const tr = document.createElement('tr');
                 tr.classList.add('record-table-card');
-                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent">${escapeHtml(rec.classContent)}</td><td class="editable-field" data-id="${rec.id}" data-field="reviewText">${escapeHtml(rec.reviewText)}</td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm editRecordBtn" data-id="${rec.id}">✏️ 编辑</button> <button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
+                tr.innerHTML = `<td data-label="选择"><input type="checkbox" class="record-checkbox" value="${rec.id}"></td><td data-label="学生">${escapeHtml(rec.studentName)}</td><td data-label="班级">${escapeHtml(getClassNameById(rec.classId))}</td><td data-label="主题">${escapeHtml((rec.classTopic || parseClassContent(rec.classContent).classTopic || ''))}</td><td class="editable-field" data-id="${rec.id}" data-field="classContent"><div class="cell-scroll">${escapeHtml(rec.classContent)}</div></td><td class="editable-field" data-id="${rec.id}" data-field="reviewText"><div class="cell-scroll">${escapeHtml(rec.reviewText)}</div></td><td data-label="时间"><input type="datetime-local" class="rec-date-edit" data-id="${rec.id}" value="${dateValue}"></td><td class="btn-group"><button class="btn-secondary btn-sm editRecordBtn" data-id="${rec.id}">✏️ 编辑</button> <button class="btn-secondary btn-sm saveRecordBtn" data-id="${rec.id}">💾 保存</button> <button class="btn-danger btn-sm delRecordBtn" data-id="${rec.id}">删除</button></td>`;
                 tbody.appendChild(tr);
             });
         }
