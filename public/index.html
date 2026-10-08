@@ -265,6 +265,15 @@
         .mini-bar { background: #eef2f7; border-radius: 6px; height: 8px; overflow: hidden; min-width: 80px; }
         .mini-bar-fill { background: var(--primary); height: 100%; }
         .empty-hint { color: var(--text-muted); text-align: center; padding: 24px; font-size: 13px; }
+        /* 页面内统计概览条 */
+        .stat-line {
+            display: flex; flex-wrap: wrap; gap: 10px 22px;
+            background: var(--bg); border: 1px solid var(--border);
+            border-radius: 12px; padding: 12px 16px; margin-bottom: 14px;
+            font-size: 13px; color: var(--text-muted);
+        }
+        .stat-line b { color: var(--text); font-size: 16px; margin-right: 4px; }
+        .stat-line .stat-item { display: inline-flex; align-items: baseline; white-space: nowrap; }
         th {
             background: #f8fafc;
             font-weight: 600;
@@ -878,7 +887,6 @@
             <button class="nav-tab active" data-tab="record">📝 课堂记录</button>
             <button class="nav-tab" data-tab="config">⚙️ 班级管理</button>
             <button class="nav-tab" data-tab="monthly">📅 月度整合</button>
-            <button class="nav-tab" data-tab="stats">📊 数据统计</button>
         </div>
         
         <!-- 配置页 -->
@@ -912,6 +920,7 @@
                     <button id="addClassBtn" class="btn-primary btn-sm">➕ 新班级</button>
                 </div>
                 <div class="card-body">
+                    <div id="classOverview" class="stat-line" style="margin-bottom:14px;"></div>
                     <div class="btn-group" id="classListContainer" style="flex-wrap:wrap;"></div>
                     <div class="info-tip">点击班级名称可编辑，删除会清除该班级所有学生和记录</div>
                 </div>
@@ -977,7 +986,7 @@
                         <div class="form-group"><label>姓名搜索</label><input type="text" id="nameFilterSelectGen" placeholder="搜索学生"></div>
                         <button id="refreshStudentListGenBtn" class="btn-secondary">刷新</button>
                     </div>
-                    <div id="studentChecklist" class="student-tags" style="margin-bottom:16px;"></div>
+                    <div id="studentChecklist" class="batch-student-grid" style="margin-bottom:16px;"></div>
                     <div class="form-grid">
                         <div class="form-group"><label>📖 课堂内容</label><textarea id="classContentInput" rows="3" placeholder="本节课的课堂内容"></textarea></div>
                         <div class="form-group"><label>💬 通用表现</label><textarea id="generalPerf" rows="3" placeholder="该班级的普遍表现"></textarea></div>
@@ -1012,6 +1021,7 @@
                         <button id="searchRecordsBtn" class="btn-secondary">筛选</button>
                         <button id="resetRecordsBtn" class="btn-secondary">重置</button>
                     </div>
+                    <div id="recordFilterSummary" class="stat-line"></div>
                     <div class="table-wrap record-table-wrap">
                         <table class="record-table">
                             <thead><tr><th data-label="选择"><input type="checkbox" id="recordSelectAllCheckbox"></th><th data-label="学生">学生</th><th data-label="班级">班级</th><th data-label="主题">主题</th><th data-label="课堂内容">课堂内容</th><th data-label="课评">课评</th><th data-label="时间">时间</th><th data-label="操作">操作</th></tr></thead>
@@ -1019,6 +1029,14 @@
                         </table>
                     </div>
                 </div>
+            </div>
+            <div class="card" style="margin-top:18px;">
+                <div class="card-header"><h3>📈 课评产出趋势（按月）</h3></div>
+                <div class="card-body"><div id="trendChart" class="chart-box"></div></div>
+            </div>
+            <div class="card" style="margin-top:18px;">
+                <div class="card-header"><h3>🏷️ 课堂主题分布 Top10</h3></div>
+                <div class="card-body"><div id="topicChart" class="chart-box"></div></div>
             </div>
         </div>
         
@@ -2078,7 +2096,10 @@
             const container = document.getElementById('studentChecklist');
             if (!container) return;
             if (filtered.length === 0) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">暂无学生</div>'; return; }
-            container.innerHTML = filtered.map(s => `<label class="student-tag"><input type="checkbox" class="stuCheckItem" value="${s.id}" ${selectedStudentIds.has(parseInt(s.id)) ? 'checked' : ''}> ${escapeHtml(s.name)} (${escapeHtml(getClassNameById(s.classId))})</label>`).join('');
+            container.innerHTML = filtered.map(s => {
+                const sel = selectedStudentIds.has(parseInt(s.id));
+                return `<div class="batch-student-card${sel ? ' checked' : ''}" data-id="${s.id}"><input type="checkbox" class="stuCheckItem" value="${s.id}" id="gen_${s.id}" ${sel ? 'checked' : ''}><div class="batch-student-info"><div class="batch-student-name">${escapeHtml(s.name)}</div><div class="batch-student-class">${escapeHtml(getClassNameById(s.classId))}</div></div></div>`;
+            }).join('');
             // 只显示已勾选学生的单独表现输入框，避免整班学生占满面板
             renderIndividualPerfInputs(filtered.filter(s => selectedStudentIds.has(parseInt(s.id))));
         }
@@ -3288,7 +3309,7 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                             individualPerfArea.innerHTML = '';
                             individualPerfArea.style.display = 'none';
                         }
-                        document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+                        document.querySelectorAll('.stuCheckItem').forEach(cb => { cb.checked = false; const card = cb.closest('.batch-student-card'); if (card) card.classList.remove('checked'); });
                         selectedStudentIds.clear();
                     }
 
@@ -3523,7 +3544,7 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                             if (remaining <= 0) {
                                 const classContentInput = document.getElementById('classContentInput');
                                 if (classContentInput) classContentInput.value = '';
-                                document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+                                document.querySelectorAll('.stuCheckItem').forEach(cb => { cb.checked = false; const card = cb.closest('.batch-student-card'); if (card) card.classList.remove('checked'); });
                                 selectedStudentIds.clear();
                             }
                         }).catch(() => {
