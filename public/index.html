@@ -260,6 +260,11 @@
             top: 0;
             z-index: 3;
         }
+        /* 统计页：图表容器 / 迷你进度条 / 空态提示 */
+        .chart-box { width: 100%; overflow-x: auto; padding: 4px 0; }
+        .mini-bar { background: #eef2f7; border-radius: 6px; height: 8px; overflow: hidden; min-width: 80px; }
+        .mini-bar-fill { background: var(--primary); height: 100%; }
+        .empty-hint { color: var(--text-muted); text-align: center; padding: 24px; font-size: 13px; }
         th {
             background: #f8fafc;
             font-weight: 600;
@@ -873,6 +878,7 @@
             <button class="nav-tab active" data-tab="record">📝 课堂记录</button>
             <button class="nav-tab" data-tab="config">⚙️ 班级管理</button>
             <button class="nav-tab" data-tab="monthly">📅 月度整合</button>
+            <button class="nav-tab" data-tab="stats">📊 数据统计</button>
         </div>
         
         <!-- 配置页 -->
@@ -1083,6 +1089,32 @@
         </div>
     </div>
 </div>
+
+        <div id="tab-stats" class="tab-content">
+            <div class="card">
+                <div class="card-header"><h3>📊 班级课评概览</h3></div>
+                <div class="card-body">
+                    <div class="table-wrap">
+                        <table class="record-table">
+                            <thead><tr><th>班级</th><th>学生数</th><th>课评条数</th><th>覆盖课次</th><th>人均课评</th><th>平均字数</th><th>课评量</th></tr></thead>
+                            <tbody id="classStatsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:18px;">
+                <div class="card-header"><h3>📈 课评产出趋势（按月）</h3></div>
+                <div class="card-body">
+                    <div id="trendChart" class="chart-box"></div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:18px;">
+                <div class="card-header"><h3>🏷️ 课堂主题分布 Top10</h3></div>
+                <div class="card-body">
+                    <div id="topicChart" class="chart-box"></div>
+                </div>
+            </div>
+        </div>
 
 <!-- 模态框 -->
 <div id="addRecordModal" class="modal-overlay">
@@ -3260,9 +3292,91 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                         selectedStudentIds.clear();
                     }
 
+                    if (tabId === 'stats') renderStats();
                     renderAllByTab();
                 });
             });
+
+            // ===== 数据统计（📊 数据统计 tab）=====
+            function truncateStr(s, n) { return (s || '').length > n ? (s.slice(0, n) + '…') : (s || ''); }
+            function buildBarChart(data, opts) {
+                opts = opts || {};
+                if (!data || !data.length) return '<div class="empty-hint">暂无数据</div>';
+                const horizontal = !!opts.horizontal;
+                const color = opts.color || '#4f8cff';
+                const max = Math.max.apply(null, data.map(d => d.value).concat([1]));
+                if (!horizontal) {
+                    const width = Math.max(320, data.length * 54);
+                    const height = opts.height || 240;
+                    const padB = 28, padT = 18, padX = 12;
+                    const chartH = height - padB - padT;
+                    const step = (width - padX * 2) / data.length;
+                    const bw = step * 0.6;
+                    let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" preserveAspectRatio="xMidYMid meet" style="max-width:' + width + 'px;">';
+                    data.forEach((d, i) => {
+                        const h = (d.value / max) * chartH;
+                        const x = padX + step * i + (step - bw) / 2;
+                        const y = padT + chartH - h;
+                        svg += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="4" fill="' + color + '"><title>' + escapeHtml(d.label) + ': ' + d.value + '</title></rect>';
+                        svg += '<text x="' + (x + bw / 2) + '" y="' + (y - 4) + '" text-anchor="middle" font-size="11" fill="#64748b">' + d.value + '</text>';
+                        svg += '<text x="' + (x + bw / 2) + '" y="' + (padT + chartH + 16) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + escapeHtml(d.label) + '</text>';
+                    });
+                    svg += '</svg>';
+                    return svg;
+                } else {
+                    const rowH = 26, padL = 116, padR = 40, padT = 8;
+                    const width = opts.width || 640;
+                    const chartW = width - padL - padR;
+                    const height = padT + data.length * rowH + 8;
+                    let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" preserveAspectRatio="xMidYMid meet" style="max-width:' + width + 'px;">';
+                    data.forEach((d, i) => {
+                        const y = padT + i * rowH + 3;
+                        const bw = (d.value / max) * chartW;
+                        svg += '<text x="' + (padL - 8) + '" y="' + (y + rowH / 2) + '" text-anchor="end" font-size="11" fill="#334155">' + escapeHtml(truncateStr(d.label, 12)) + '</text>';
+                        svg += '<rect x="' + padL + '" y="' + y + '" width="' + bw + '" height="' + (rowH - 9) + '" rx="4" fill="' + color + '"><title>' + escapeHtml(d.label) + ': ' + d.value + '</title></rect>';
+                        svg += '<text x="' + (padL + bw + 6) + '" y="' + (y + rowH / 2) + '" font-size="11" fill="#64748b">' + d.value + '</text>';
+                    });
+                    svg += '</svg>';
+                    return svg;
+                }
+            }
+            function renderStats() {
+                const classStats = (classes || []).map(c => {
+                    const clsStudents = (students || []).filter(s => Number(s.classId) === Number(c.id));
+                    const clsRecords = (records || []).filter(r => Number(r.classId) === Number(c.id));
+                    const studentCount = clsStudents.length;
+                    const reviewCount = clsRecords.length;
+                    const lessonDays = new Set(clsRecords.map(r => (r.recorddate || '').slice(0, 10))).size;
+                    const avgPerStudent = studentCount ? (reviewCount / studentCount).toFixed(1) : '0';
+                    const avgWords = reviewCount ? Math.round(clsRecords.reduce((sum, r) => sum + (r.reviewText || '').length, 0) / reviewCount) : 0;
+                    return { name: c.name, studentCount, reviewCount, lessonDays, avgPerStudent, avgWords };
+                }).sort((a, b) => b.reviewCount - a.reviewCount);
+                const tbody = document.getElementById('classStatsBody');
+                const maxReview = Math.max(1, ...classStats.map(c => c.reviewCount));
+                tbody.innerHTML = classStats.length
+                    ? classStats.map(c => '<tr><td>' + escapeHtml(c.name) + '</td><td>' + c.studentCount + '</td><td>' + c.reviewCount + '</td><td>' + c.lessonDays + '</td><td>' + c.avgPerStudent + '</td><td>' + c.avgWords + '</td><td style="min-width:120px;"><div class="mini-bar"><div class="mini-bar-fill" style="width:' + (c.reviewCount / maxReview * 100).toFixed(0) + '%"></div></div></td></tr>').join('')
+                    : '<tr><td colspan="7" class="empty-hint">暂无班级数据，请先添加班级与课评记录</td></tr>';
+
+                // 时间趋势（按月）
+                const monthMap = {};
+                (records || []).forEach(r => {
+                    const m = (r.recorddate || '').slice(0, 7);
+                    if (m) monthMap[m] = (monthMap[m] || 0) + 1;
+                });
+                let months = Object.keys(monthMap).sort();
+                if (months.length > 12) months = months.slice(-12);
+                const trendData = months.map(m => ({ label: m.slice(2).replace('-', '/'), value: monthMap[m] }));
+                document.getElementById('trendChart').innerHTML = buildBarChart(trendData, { height: 240 });
+
+                // 主题分布 Top10
+                const topicMap = {};
+                (records || []).forEach(r => {
+                    const t = (r.classTopic || '').trim();
+                    if (t) topicMap[t] = (topicMap[t] || 0) + 1;
+                });
+                const topicData = Object.keys(topicMap).map(t => ({ label: t, value: topicMap[t] })).sort((a, b) => b.value - a.value).slice(0, 10);
+                document.getElementById('topicChart').innerHTML = buildBarChart(topicData, { height: Math.max(180, topicData.length * 28), horizontal: true });
+            }
 
             // 输入框保护：用户停手（失焦）后，若后台同步期间被跳过刷新，则立即补刷记录列表。
             // 效果：自动同步照常把最新数据拉进内存，但编辑中的输入框不会被重建打断；停手即见最新。
