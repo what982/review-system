@@ -1095,8 +1095,10 @@
     <div class="modal">
         <div class="modal-header"><h3>✏️ 批量编辑记录</h3></div>
         <div class="modal-body">
-            <div class="form-group"><label>新课堂内容（留空不修改）</label><textarea id="batchEditClassContent" rows="2"></textarea></div>
-            <div class="form-group"><label>新课评（留空不修改）</label><textarea id="batchEditReviewText" rows="4"></textarea></div>
+            <div class="form-group"><label>主题（留空不修改）</label><input type="text" id="batchEditTopic" placeholder="如：循环结构"></div>
+            <div class="form-group"><label>课堂内容（留空不修改）</label><textarea id="batchEditClassContent" rows="2"></textarea></div>
+            <div class="form-group"><label>课评内容（留空不修改）</label><textarea id="batchEditReviewText" rows="4"></textarea></div>
+            <div class="form-group"><label>记录时间（留空不修改）</label><input type="datetime-local" id="batchEditDate"></div>
         </div>
         <div class="modal-footer">
             <button id="closeBatchEditBtn" class="btn-secondary">取消</button>
@@ -2319,8 +2321,10 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
         function batchEditSelected() {
             const checked = Array.from(document.querySelectorAll('.record-checkbox:checked')).map(cb => parseInt(cb.value));
             if (!checked.length) { showToast('请选择记录', true); return; }
+            document.getElementById('batchEditTopic').value = '';
             document.getElementById('batchEditClassContent').value = '';
             document.getElementById('batchEditReviewText').value = '';
+            document.getElementById('batchEditDate').value = '';
             document.getElementById('batchEditModal').dataset.ids = JSON.stringify(checked);
             document.getElementById('batchEditModal').classList.add('show');
         }
@@ -2328,18 +2332,23 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
             const modal = document.getElementById('batchEditModal');
             const ids = JSON.parse(modal.dataset.ids || '[]');
             if (!ids.length) { showToast('无选中记录', true); return; }
+            const newTopic = document.getElementById('batchEditTopic').value.trim();
             const newClassContent = document.getElementById('batchEditClassContent').value.trim();
             const newReviewText = document.getElementById('batchEditReviewText').value.trim();
-            if (!newClassContent && !newReviewText) { showToast('请至少填写一项', true); return; }
-            // 一次性更新所有记录（本地优先）
+            const newDate = document.getElementById('batchEditDate').value;
+            if (!newTopic && !newClassContent && !newReviewText && !newDate) { showToast('请至少填写一项', true); return; }
+            // 一次性更新所有记录（本地优先）；只改填写的字段，未填保留原值
             const updatedRecords = records.filter(r => ids.includes(r.id)).map(async rec => {
+                if (newTopic) rec.classTopic = newTopic;
                 if (newClassContent) rec.classContent = newClassContent;
                 if (newReviewText) rec.reviewText = newReviewText;
+                if (newDate) rec.recorddate = newDate.replace('T', ' ') + ':00';
                 const recordForDb = {
                     id: Math.floor(Number(rec.id)),
                     studentId: Number(rec.studentId),
                     studentName: String(rec.studentName),
                     classId: Number(rec.classId),
+                    classTopic: String(rec.classTopic || ''),
                     classContent: String(rec.classContent),
                     reviewText: String(rec.reviewText),
                     recorddate: String(rec.recorddate)
