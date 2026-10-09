@@ -1013,6 +1013,13 @@
                 </div>
             </div>
             
+            <div class="card" style="margin-top:18px;">
+                <div class="card-header"><h3>📊 课评数据概览</h3></div>
+                <div class="card-body">
+                    <div id="recordStatCards" class="stat-cards"></div>
+                </div>
+            </div>
+            
             <div class="card">
                 <div class="card-header">
                     <h3>📋 课堂记录</h3>
@@ -1041,12 +1048,6 @@
                             <tbody id="recordTbody"></tbody>
                         </table>
                     </div>
-                </div>
-            </div>
-            <div class="card" style="margin-top:18px;">
-                <div class="card-header"><h3>📊 课评数据概览</h3></div>
-                <div class="card-body">
-                    <div id="recordStatCards" class="stat-cards"></div>
                 </div>
             </div>
         </div>
@@ -1948,6 +1949,7 @@
             _cacheTs.records = Date.now();
             refreshRecordMap();
             refreshRecordList();
+            renderClassStatCards();
             showToast('已保存到本地');
         }
         async function deleteRecordById(recordId) {
@@ -1958,6 +1960,7 @@
             await idbDelete('records', recordId);
             await idbPutPending('delete', 'records', { id: recordId });
             refreshRecordList();
+            renderClassStatCards();
             showToast('已删除');
         }
         async function deleteRecordsBatch(ids) {
@@ -1971,6 +1974,7 @@
                 await idbPutPending('delete', 'records', { id });
             }
             refreshRecordList();
+            renderClassStatCards();
             showToast(`已删除 ${ids.length} 条记录`);
         }
         async function addManualRecord(studentId, studentName, classId, classContent, reviewText, recordDate, classTopic = '') {
@@ -1994,6 +1998,7 @@
             const container = document.getElementById('classListContainer');
             if (!container) return;
             container.innerHTML = classes.map(cls => `<span class="student-tag">${escapeHtml(cls.name)} <button class="editClassBtn" data-id="${cls.id}" style="background:none;border:none;cursor:pointer;color:var(--primary);">✏️</button> <button class="delClassBtn" data-id="${cls.id}" style="background:none;border:none;cursor:pointer;color:var(--danger);">🗑️</button></span>`).join('');
+            renderClassStatCards();
         }
         // 事件委托：班级列表按钮点击（延迟绑定，确保 DOM 就绪）
         function bindClassListEvents() {
@@ -2037,6 +2042,7 @@
             // 全选复选框
             const selectAll = document.getElementById('selectAllStudentsCheckbox');
             if (selectAll) selectAll.onclick = (e) => document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = e.target.checked);
+            renderClassStatCards();
         }
         function editStudentById(id) {
             const stu = studentMap.get(id);
