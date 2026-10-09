@@ -1981,6 +1981,55 @@
             await saveRecordToDB({ id: genId(), studentId, studentName, classId, classContent, classTopic, reviewText, recordDate });
         }
 
+        // ===== 简单数据统计（数字卡片，不做图表）=====
+        function getMonthRecords() {
+            const now = new Date();
+            const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            return (records || []).filter(r => (r.recorddate || '').slice(0, 7) === ym);
+        }
+        function calcAvgWords(list) {
+            if (!list || !list.length) return 0;
+            const total = list.reduce((sum, r) => sum + (r.reviewText || '').length, 0);
+            return Math.round(total / list.length);
+        }
+        function buildStatCard(icon, num, label) {
+            return '<div class="stat-card">'
+                + '<div class="stat-icon">' + icon + '</div>'
+                + '<div class="stat-num">' + num + '</div>'
+                + '<div class="stat-label">' + label + '</div></div>';
+        }
+        function renderRecordStatCards() {
+            const box = document.getElementById('recordStatCards');
+            if (!box) return;
+            const all = records || [];
+            const monthRecs = getMonthRecords();
+            const studentSet = new Set(all.map(r => r.studentId));
+            const classSet = new Set(all.map(r => r.classId));
+            const cards = [
+                buildStatCard('📝', all.length, '课评总数'),
+                buildStatCard('📅', monthRecs.length, '本月课评'),
+                buildStatCard('👥', studentSet.size, '涉及学生'),
+                buildStatCard('🏫', classSet.size, '涉及班级'),
+                buildStatCard('📏', calcAvgWords(all), '平均字数')
+            ];
+            box.innerHTML = cards.join('');
+        }
+        function renderClassStatCards() {
+            const box = document.getElementById('classStatCards');
+            if (!box) return;
+            const all = records || [];
+            const monthRecs = getMonthRecords();
+            const studentSet = new Set(all.map(r => r.studentId));
+            const cards = [
+                buildStatCard('🏫', (classes || []).length, '班级数'),
+                buildStatCard('👥', (students || []).length, '学生总数'),
+                buildStatCard('📝', all.length, '课评总数'),
+                buildStatCard('📅', monthRecs.length, '本月课评'),
+                buildStatCard('✅', studentSet.size, '已评学生')
+            ];
+            box.innerHTML = cards.join('');
+        }
+
         function renderAllByTab() {
             if (currentTab === 'config') {
                 renderClassList();
@@ -3312,55 +3361,6 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                     renderAllByTab();
                 });
             });
-
-            // ===== 简单数据统计（数字卡片，不做图表）=====
-            function getMonthRecords() {
-                const now = new Date();
-                const ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-                return (records || []).filter(r => (r.recorddate || '').slice(0, 7) === ym);
-            }
-            function calcAvgWords(list) {
-                if (!list || !list.length) return 0;
-                const total = list.reduce((sum, r) => sum + (r.reviewText || '').length, 0);
-                return Math.round(total / list.length);
-            }
-            function buildStatCard(icon, num, label) {
-                return '<div class="stat-card">'
-                    + '<div class="stat-icon">' + icon + '</div>'
-                    + '<div class="stat-num">' + num + '</div>'
-                    + '<div class="stat-label">' + label + '</div></div>';
-            }
-            function renderRecordStatCards() {
-                const box = document.getElementById('recordStatCards');
-                if (!box) return;
-                const all = records || [];
-                const monthRecs = getMonthRecords();
-                const studentSet = new Set(all.map(r => r.studentId));
-                const classSet = new Set(all.map(r => r.classId));
-                const cards = [
-                    buildStatCard('📝', all.length, '课评总数'),
-                    buildStatCard('📅', monthRecs.length, '本月课评'),
-                    buildStatCard('👥', studentSet.size, '涉及学生'),
-                    buildStatCard('🏫', classSet.size, '涉及班级'),
-                    buildStatCard('📏', calcAvgWords(all), '平均字数')
-                ];
-                box.innerHTML = cards.join('');
-            }
-            function renderClassStatCards() {
-                const box = document.getElementById('classStatCards');
-                if (!box) return;
-                const all = records || [];
-                const monthRecs = getMonthRecords();
-                const studentSet = new Set(all.map(r => r.studentId));
-                const cards = [
-                    buildStatCard('🏫', (classes || []).length, '班级数'),
-                    buildStatCard('👥', (students || []).length, '学生总数'),
-                    buildStatCard('📝', all.length, '课评总数'),
-                    buildStatCard('📅', monthRecs.length, '本月课评'),
-                    buildStatCard('✅', studentSet.size, '已评学生')
-                ];
-                box.innerHTML = cards.join('');
-            }
 
             // 输入框保护：用户停手（失焦）后，若后台同步期间被跳过刷新，则立即补刷记录列表。
             // 效果：自动同步照常把最新数据拉进内存，但编辑中的输入框不会被重建打断；停手即见最新。
