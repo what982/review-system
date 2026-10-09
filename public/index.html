@@ -999,6 +999,14 @@
                         <div class="form-group"><label>姓名搜索</label><input type="text" id="nameFilterSelectGen" placeholder="搜索学生"></div>
                         <button id="refreshStudentListGenBtn" class="btn-secondary">刷新</button>
                     </div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+                        <strong>👥 选择学生（生成课评对象）</strong>
+                        <div class="btn-group">
+                            <button id="genSelectAllBtn" class="btn-secondary btn-sm">全选</button>
+                            <button id="genClearAllBtn" class="btn-secondary btn-sm">清空</button>
+                            <span id="genSelectedCount" style="background:var(--primary);color:white;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;display:none;">已选 0</span>
+                        </div>
+                    </div>
                     <div id="studentChecklist" class="batch-student-grid" style="margin-bottom:16px;"></div>
                     <div class="form-grid">
                         <div class="form-group"><label>📖 课堂内容</label><textarea id="classContentInput" rows="3" placeholder="本节课的课堂内容"></textarea></div>
@@ -2177,21 +2185,95 @@
             }
         }
 
+        // 生成课评页：按当前筛选条件取得学生列表
+        function getGenFilteredStudents() {
+            const cf = document.getElementById('classFilterSelectGen');
+            const nf = document.getElementById('nameFilterSelectGen');
+            const classFilter = cf ? cf.value : '';
+            const nameFilter = nf ? nf.value.trim().toLowerCase() : '';
+            return (students || []).filter(s => (!classFilter || s.classId == classFilter) && (!nameFilter || s.name.toLowerCase().includes(nameFilter)));
+        }
+        // 生成课评页：已选人数角标
+        function updateGenSelectedCount() {
+            const badge = document.getElementById('genSelectedCount');
+            if (!badge) return;
+            const n = selectedStudentIds.size;
+            if (n > 0) { badge.textContent = '已选 ' + n; badge.style.display = 'inline-block'; }
+            else { badge.style.display = 'none'; }
+        }
+        // 生成课评页：刷新"按学生单独填写表现"输入区
+        // 始终覆盖"已勾选的全部学生"（与当前筛选无关），避免切换筛选后已填写的内容看似消失
+        function syncIndividualPerfArea() {
+            const picked = (students || []).filter(s => selectedStudentIds.has(parseInt(s.id)));
+            renderIndividualPerfInputs(picked);
+        }
         function refreshStudentSelectors() {
             // 用户正在输入时不重建列表，避免打断操作
             if (isUserTyping()) { _pendingStudentRefresh = true; return; }
-            const classFilter = document.getElementById('classFilterSelectGen').value;
-            const nameFilter = document.getElementById('nameFilterSelectGen').value.trim().toLowerCase();
-            let filtered = students.filter(s => (!classFilter || s.classId == classFilter) && (!nameFilter || s.name.toLowerCase().includes(nameFilter)));
+            const filtered = getGenFilteredStudents();
             const container = document.getElementById('studentChecklist');
             if (!container) return;
-            if (filtered.length === 0) { container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">暂无学生</div>'; return; }
+            if (filtered.length === 0) {
+                container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">暂无学生</div>';
+                syncIndividualPerfArea();
+                updateGenSelectedCount();
+                return;
+            }
             container.innerHTML = filtered.map(s => {
                 const sel = selectedStudentIds.has(parseInt(s.id));
                 return `<div class="batch-student-card${sel ? ' checked' : ''}" data-id="${s.id}"><input type="checkbox" class="stuCheckItem" value="${s.id}" id="gen_${s.id}" ${sel ? 'checked' : ''}><div class="batch-student-info"><div class="batch-student-name">${escapeHtml(s.name)}</div><div class="batch-student-class">${escapeHtml(getClassNameById(s.classId))}</div></div></div>`;
             }).join('');
             // 只显示已勾选学生的单独表现输入框，避免整班学生占满面板
-            renderIndividualPerfInputs(filtered.filter(s => selectedStudentIds.has(parseInt(s.id))));
+            syncIndividualPerfArea();
+            updateGenSelectedCount();
+        }
+        // 生成课评页「学生勾选」交互绑定（容器级委托，重复调用安全）
+        function bindGenStudentGrid() {
+            const checklistEl = document.getElementById('studentChecklist');
+            if (!checklistEl || checklistEl.dataset.bound) return;
+            // 统一的勾选处理：更新 Set → 卡片高亮 → 单独表现区 → 已选角标
+            // 注意：不做整表重建，避免打断滚动位置与输入焦点
+            const applyToggle = function(cb) {
+                const id = parseInt(cb.value);
+                if (cb.checked) selectedStudentIds.add(id);
+                else selectedStudentIds.delete(id);
+                const card = cb.closest('.batch-student-card');
+                if (card) card.classList.toggle('checked', cb.checked);
+                syncIndividualPerfArea();
+                updateGenSelectedCount();
+            };
+            checklistEl.addEventListener('change', function(e) {
+                if (e.target.classList.contains('stuCheckItem')) applyToggle(e.target);
+            });
+            // 点击卡片本体（非复选框）同样可勾选，与「月度整合」页交互保持一致
+            checklistEl.addEventListener('click', function(e) {
+                if (e.target.classList.contains('stuCheckItem')) return; // 复选框交给 change
+                const card = e.target.closest('.batch-student-card');
+                if (!card) return;
+                const cb = card.querySelector('.stuCheckItem');
+                if (!cb) return;
+                cb.checked = !cb.checked;
+                applyToggle(cb);
+            });
+            checklistEl.dataset.bound = '1';
+
+            // 全选 / 清空
+            const genSelectAllBtn = document.getElementById('genSelectAllBtn');
+            if (genSelectAllBtn) genSelectAllBtn.addEventListener('click', function() {
+                getGenFilteredStudents().forEach(s => selectedStudentIds.add(parseInt(s.id)));
+                refreshStudentSelectors();
+            });
+            const genClearAllBtn = document.getElementById('genClearAllBtn');
+            if (genClearAllBtn) genClearAllBtn.addEventListener('click', function() {
+                selectedStudentIds.clear();
+                document.querySelectorAll('#studentChecklist .stuCheckItem').forEach(cb => {
+                    cb.checked = false;
+                    const card = cb.closest('.batch-student-card');
+                    if (card) card.classList.remove('checked');
+                });
+                syncIndividualPerfArea();
+                updateGenSelectedCount();
+            });
         }
         function renderIndividualPerfInputs(filteredStudents) {
             const area = document.getElementById('individualPerfArea');
@@ -2406,8 +2488,10 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
             // 生成完成后清空输入和勾选状态，防止重复保存；保留结果卡片供查看和编辑
             const classContentInput = document.getElementById('classContentInput');
             if (classContentInput) classContentInput.value = '';
-            document.querySelectorAll('.stuCheckItem').forEach(cb => cb.checked = false);
+            document.querySelectorAll('.stuCheckItem').forEach(cb => { cb.checked = false; const card = cb.closest('.batch-student-card'); if (card) card.classList.remove('checked'); });
             selectedStudentIds.clear();
+            syncIndividualPerfArea();
+            updateGenSelectedCount();
         }
 
         let _pendingRecordRefresh = false;
@@ -2629,7 +2713,13 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
         }
 
         // 批量学生卡片点击事件委托（绑定一次，不重复绑定）
+        // 重要：必须限定在 #batchStudentListContainer 之内。
+        // 否则会连带劫持「课堂记录页」同名的 .batch-student-card 卡片：
+        // 点击记录页学生卡片时，这里会把 id 写进月度页的 selectedBatchIds，
+        // 导致记录页卡片显示为"已选中"，但记录页自己的 selectedStudentIds 没更新，
+        // "按学生单独填写表现"区就一直显示"请先在上方勾选学生"。
         document.addEventListener('click', function(e) {
+            if (!e.target.closest('#batchStudentListContainer')) return;
             const card = e.target.closest('.batch-student-card');
             if (!card) return;
             const cb = card.querySelector('input[type="checkbox"]');
@@ -3403,6 +3493,7 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                         }
                         document.querySelectorAll('.stuCheckItem').forEach(cb => { cb.checked = false; const card = cb.closest('.batch-student-card'); if (card) card.classList.remove('checked'); });
                         selectedStudentIds.clear();
+                        updateGenSelectedCount();
                     }
 
                     if (tabId === 'record') renderRecordStatCards();
@@ -3504,20 +3595,8 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
             document.getElementById('classFilterSelectGen').addEventListener('change', refreshStudentSelectors);
             document.getElementById('nameFilterSelectGen').addEventListener('input', refreshStudentSelectors);
             document.getElementById('refreshStudentListGenBtn').addEventListener('click', refreshStudentSelectors);
-            // 勾选状态同步到 selectedStudentIds（容器级委托，只绑一次）
-            const checklistEl = document.getElementById('studentChecklist');
-            if (checklistEl && !checklistEl.dataset.bound) {
-                checklistEl.addEventListener('change', function(e) {
-                    if (e.target.classList.contains('stuCheckItem')) {
-                        const id = parseInt(e.target.value);
-                        if (e.target.checked) selectedStudentIds.add(id);
-                        else selectedStudentIds.delete(id);
-                        // 同步刷新"单独表现"输入区（只保留已勾选学生）
-                        refreshStudentSelectors();
-                    }
-                });
-                checklistEl.dataset.bound = '1';
-            }
+            // 生成课评页：学生勾选交互（抽成独立函数，便于复用与验证）
+            bindGenStudentGrid();
             // 生成结果卡片按钮委托（只绑一次，避免每次生成重复叠加监听器）
             const genContainer = document.getElementById('generatedPreviews');
             if (genContainer && !genContainer.dataset.bound) {
@@ -3558,6 +3637,8 @@ ${historyReviews ? `13. 以下是${student.name}的往期课评，仅供你避�
                                 if (classContentInput) classContentInput.value = '';
                                 document.querySelectorAll('.stuCheckItem').forEach(cb => { cb.checked = false; const card = cb.closest('.batch-student-card'); if (card) card.classList.remove('checked'); });
                                 selectedStudentIds.clear();
+                                syncIndividualPerfArea();
+                                updateGenSelectedCount();
                             }
                         }).catch(() => {
                             showToast('保存失败，请重试', true);
